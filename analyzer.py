@@ -559,10 +559,10 @@ class BinanceAnalyzer:
         df['adx'] = ta.trend.adx(df['high'], df['low'], df['close'], window=14)
         df['plus_di'] = ta.trend.adx_pos(df['high'], df['low'], df['close'], window=14)
         df['minus_di'] = ta.trend.adx_neg(df['high'], df['low'], df['close'], window=14)
-        
-     # ===== FIXED: AROON (close සහ window පමණයි! high/low එපා!) =====
-        df['aroon_up'] = ta.trend.aroon_up(df['close'], window=25)
-        df['aroon_down'] = ta.trend.aroon_down(df['close'], window=25)
+
+අලුත්:
+df['aroon_up'] = 50.0
+df['aroon_down'] = 50.0
         
         # Ichimoku Cloud
         df['ichimoku_a'] = ta.trend.ichimoku_a(df['high'], df['low'], window1=9, window2=26)
