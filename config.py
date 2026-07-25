@@ -4,17 +4,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============ BINANCE ============
-# මේ 3 endpoints වලින් එකක් try කරනවා
-# API key නැතුවත් public data ගන්න පුලුවන්
 BINANCE_API_KEY = os.getenv("YcOlogq4DNe36jV0XhtceL19b56bkNKgOPEUqJYCUCWgaQBNn1Bx1pP3lgT8ukqH", "")
 BINANCE_SECRET_KEY = os.getenv("5VcyO8O8cwCNKAQuO1kanYaPMS5cf9EhCUGPG0Lj7XqPBReDoR4rp6ERNO6dYsVo", "")
 
 # ============ TELEGRAM ============
-TELEGRAM_BOT_TOKEN = os.getenv("8250452036:AAE00tft6EXXrd2uK92VVfGq3bkiFT5bTOA")
-TELEGRAM_CHAT_ID = os.getenv("8250452036")
+TELEGRAM_BOT_TOKEN = os.getenv("8250452036:AAE00tft6EXXrd2uK92VVfGq3bkiFT5bTOA", "")
+TELEGRAM_CHAT_ID = os.getenv("8250452036", "")
 
 # ============ COINS ============
-# Binance format (USDT pair එක ඉවරයි)
 COINS = [
     "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
     "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
