@@ -13,7 +13,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global variables
-analyzer = BinanceAnalyzer(BINANCE_API_KEY, BINANCE_SECRET_KEY)
+analyzer = BinanceAnalyzer()
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 user_coins = set(COINS)  # default all coins
 signal_history = []
