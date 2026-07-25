@@ -1,8 +1,6 @@
 python-telegram-bot==20.8
-python-binance==1.0.22
+ccxt==4.3.41
 pandas==2.2.1
 ta==0.11.0
 numpy==1.26.4
-ccxt==4.3.41
-asyncio==3.4.3
 python-dotenv==1.0.1
