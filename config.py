@@ -4,12 +4,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============ BINANCE ============
-BINANCE_API_KEY = os.getenv("YcOlogq4DNe36jV0XhtceL19b56bkNKgOPEUqJYCUCWgaQBNn1Bx1pP3lgT8ukqH", "")
-BINANCE_SECRET_KEY = os.getenv("5VcyO8O8cwCNKAQuO1kanYaPMS5cf9EhCUGPG0Lj7XqPBReDoR4rp6ERNO6dYsVo", "")
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
 
 # ============ TELEGRAM ============
-TELEGRAM_BOT_TOKEN = os.getenv("8250452036:AAE00tft6EXXrd2uK92VVfGq3bkiFT5bTOA", "")
-TELEGRAM_CHAT_ID = os.getenv("8250452036", "")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ============ COINS ============
 COINS = [
