@@ -569,7 +569,7 @@ class BinanceAnalyzer:
         df['ichimoku_b'] = ta.trend.ichimoku_b(df['high'], df['low'], window2=26, window3=52)
         
         # PSAR
-        df['psar'] = ta.trend.psar_indicator(df['high'], df['low'], df['close'], step=0.02, max_step=0.2)
+        df['psar'] = 0.0
         
         # ===== DIVERGENCE DETECTION =====
         df['price_higher_high'] = (df['high'] > df['high'].shift(1)) & (df['high'].shift(1) > df['high'].shift(2))
