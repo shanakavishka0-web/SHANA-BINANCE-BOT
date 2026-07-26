@@ -825,7 +825,7 @@ class BinanceAnalyzer:
         return None
 
     def find_long_signal(self, symbol):
-        """LONG signal"""
+        """LONG signal — FIXED: volume_ratio -> volume_ratio_5"""
         df = self.get_klines(symbol, "1m", 100)
         if df is None or len(df) < 50:
             return None
@@ -849,8 +849,8 @@ class BinanceAnalyzer:
         if latest['close'] <= latest['bb_lower'] * 1.02:
             signals.append("Near Lower Bollinger Band")
             confidence += 10
-        if latest['volume_ratio'] > VOLUME_THRESHOLD and latest['is_bullish']:
-            signals.append(f"High Volume Buy: {latest['volume_ratio']:.1f}x")
+        if latest['volume_ratio_5'] > VOLUME_THRESHOLD and latest['is_bullish']:
+            signals.append(f"High Volume Buy: {latest['volume_ratio_5']:.1f}x")
             confidence += 15
 
         if len(signals) >= 3 and confidence >= 40:
@@ -868,7 +868,7 @@ class BinanceAnalyzer:
                 'strength': len(signals),
                 'reasons': signals,
                 'rsi': latest['rsi'],
-                'volume_ratio': latest['volume_ratio'],
+                'volume_ratio': latest['volume_ratio_5'],
                 'timestamp': datetime.now().isoformat()
             }
             
