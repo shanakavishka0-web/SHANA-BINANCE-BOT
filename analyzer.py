@@ -559,12 +559,12 @@ class BinanceAnalyzer:
         df['adx'] = ta.trend.adx(df['high'], df['low'], df['close'], window=14)
         df['plus_di'] = ta.trend.adx_pos(df['high'], df['low'], df['close'], window=14)
         df['minus_di'] = ta.trend.adx_neg(df['high'], df['low'], df['close'], window=14)
-
-අලුත්:
-df['aroon_up'] = 50.0
-df['aroon_down'] = 50.0
         
-        # Ichimoku Cloud
+        # ===== AROON — FIXED (neutral values - library version issue) =====
+        df['aroon_up'] = 50.0
+        df['aroon_down'] = 50.0
+        
+        # ===== ICHIMOKU CLOUD =====
         df['ichimoku_a'] = ta.trend.ichimoku_a(df['high'], df['low'], window1=9, window2=26)
         df['ichimoku_b'] = ta.trend.ichimoku_b(df['high'], df['low'], window2=26, window3=52)
         
@@ -584,7 +584,7 @@ df['aroon_down'] = 50.0
 
     def find_short_signal(self, symbol):
         """SHORT signal — 90-95% ACCURACY TARGET — FULL ANALYSIS"""
-        df = self.get_klines(symbol, "1m", 200)  # More data for accurate analysis
+        df = self.get_klines(symbol, "1m", 200)
         if df is None or len(df) < 100:
             return None
 
@@ -595,6 +595,7 @@ df['aroon_down'] = 50.0
         signals = []
         confidence = 0
         weight_total = 0
+        weight_hit = 0
 
         # 1. RSI OVERBOUGHT (Weight: 12)
         if latest['rsi'] > RSI_OVERBOUGHT:
@@ -751,11 +752,10 @@ df['aroon_down'] = 50.0
             weight_hit += 6
         weight_total += 6
 
-        # 17. AROON (Weight: 6)
-        if latest['aroon_down'] > latest['aroon_up'] and latest['aroon_down'] > 70:
-            signals.append(f"📊 Aroon Strong Downtrend (Down:{latest['aroon_down']:.0f}%)")
-            confidence += 6
-            weight_hit += 6
+        # 17. AROON (Weight: 6) — neutral value (50)
+        if latest['aroon_down'] > latest['aroon_up']:
+            confidence += 3
+            weight_hit += 3
         weight_total += 6
 
         # 19. VOLUME PRICE TREND (Weight: 5)
@@ -875,9 +875,3 @@ df['aroon_down'] = 50.0
             self.track_signal(signal_result)
             return signal_result
         return None
-
-
-# ============ VERIFICATION (අනිවාර්යයෙන්ම මෙය පහළින් තියෙන්න ඕනේ!) ============
-if __name__ == "__main__":
-    print("✅ BinanceAnalyzer class loaded successfully!")
-    print(f"   Class methods: {[m for m in dir(BinanceAnalyzer) if not m.startswith('__')]}")
