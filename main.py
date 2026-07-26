@@ -71,14 +71,15 @@ async def start(update, context):
         logger.warning(f"Welcome image not available: {e}")
 
     welcome_text = (
-        "🌟 *Welcome to SHANA Signal Bot* 🌟\n\n"
+        "🌟 *WELCOME to SHANA SHANA * 🌟\n\n"
         "🤖 *Powered by Binance*\n"
         "📊 *Real-time Cryptocurrency Analysis*\n\n"
-        "🔹 Live Price Tracking — හැම coin එකම 🟢\n"
-        "🔹 Smart Trading Signals — Timeframe 5m/20m/50m/1h/2h ⏰\n"
+        "🔹 Live Price Tracking  💸\n"
+        "🔹 Smart Trading Signals —  5m/20m/50m/1h/2h ⏰\n"
         "🔹 Signal Tracking — WIN/LOSS 100% Track 🏆\n"
-        "🔹 Live WIN% — Progress bar එක්ක 🎯\n\n"
+        "🔹 Live WIN% —  🎯\n\n"
         "👇 *Click Menu to get started*"
+        " *💀 POWER BUY SHANA 💀*"
     )
 
     keyboard = [[InlineKeyboardButton("📋 MENU", callback_data='menu')]]
@@ -94,7 +95,7 @@ async def start(update, context):
 # ============ MAIN MENU ============
 async def show_menu(query):
     keyboard = [
-        [InlineKeyboardButton("🕹️ LIVE PRICE — හැම Coin එකම", callback_data='prices')],
+        [InlineKeyboardButton("🕹️ LIVE PRICE ", callback_data='prices')],
         [InlineKeyboardButton("🟢 NOW GOOD COIN", callback_data='best_coin')],
         [InlineKeyboardButton("💀 BINANCE SHANA SIGNALS", callback_data='shana_signals_menu')],
         [InlineKeyboardButton("📊 STATS — WIN/LOSS Track", callback_data='stats')],
@@ -113,14 +114,15 @@ async def show_menu(query):
 
 async def back_to_welcome(query):
     welcome_text = (
-        "🌟 *Welcome to SHANA Signal Bot* 🌟\n\n"
+        "🌟 *WELCOME to SHANA SHANA * 🌟\n\n"
         "🤖 *Powered by Binance*\n"
         "📊 *Real-time Cryptocurrency Analysis*\n\n"
-        "🔹 Live Price Tracking — හැම coin එකම 🟢\n"
-        "🔹 Smart Trading Signals — Timeframe 5m/20m/50m/1h/2h ⏰\n"
+        "🔹 Live Price Tracking  💸\n"
+        "🔹 Smart Trading Signals —  5m/20m/50m/1h/2h ⏰\n"
         "🔹 Signal Tracking — WIN/LOSS 100% Track 🏆\n"
-        "🔹 Live WIN% — Progress bar එක්ක 🎯\n\n"
+        "🔹 Live WIN% —  🎯\n\n"
         "👇 *Click Menu to get started*"
+        " *💀 POWER BUY SHANA 💀*"
     )
 
     keyboard = [[InlineKeyboardButton("📋 MENU", callback_data='menu')]]
@@ -137,7 +139,7 @@ async def back_to_welcome(query):
 # 💀 BINANCE SHANA SIGNALS — TIMEFRAME SUB-MENU
 # ====================================================================
 async def show_shana_signals_menu(query):
-    """💀 BINANCE SHANA SIGNALS — බටන් ටික පෙන්වන්න"""
+    """💀 BINANCE SHANA SIGNALS """
     keyboard = [
         [InlineKeyboardButton("⏰ 5 Minute", callback_data='shana_scan_5m')],
         [InlineKeyboardButton("⏰ 20 MINUTE", callback_data='shana_scan_20m')],
@@ -150,13 +152,13 @@ async def show_shana_signals_menu(query):
 
     msg = (
         "💀 *BINANCE SHANA SIGNALS* 💀\n\n"
-        "👇 *Timeframe එකක් තෝරන්න:*\n\n"
-        "⏰ *5 Minute* — ඉක්මන් signals\n"
+        "👇 *Time එකක් තෝරන්න:*\n\n"
+        "⏰ *5 Minute* — SPEED signals\n"
         "⏰ *20 MINUTE* — Medium signals\n"
         "⏰ *50 MINUTE* — Swing signals\n"
         "⏰ *1 HOURS* — Hourly signals\n"
         "⏰ *2 HOURS* — Long signals\n\n"
-        "📊 *හැම signal එකක්ම TRACK වෙනවා — DELETE වෙන්නේ නැහැ!*\n"
+        "📊 *හැම signal එකක්ම TRACK වෙනවාැ!*\n"
         "🏆 *WIN/LOSS 100% Track කරනවා*"
     )
 
@@ -169,9 +171,9 @@ async def show_shana_signals_menu(query):
 
 async def show_shana_timeframe_scan(query, context, tf_label, tf_key):
     """Timeframe එකක් scan කරලා coins list එක පෙන්වන්න"""
-    msg = f"🔍 *{tf_label} — SHORT signals සොයමින්...*\n\n"
-    msg += "⏳ *සියලුම coins scan වෙමින්...*\n"
-    msg += "_මේකට තත්පර 10-15ක් ගතවෙනවා._"
+    msg = f"🔍 *{tf_label} — SHORT signals PENDIN...*\n\n"
+    msg += "⏳ *All coins scan PENDIN...*\n"
+    msg += "_PENDIN TIME  10-15 Wait..._"
     await query.edit_message_text(msg, parse_mode='Markdown')
 
     try:
@@ -189,7 +191,7 @@ async def show_shana_timeframe_scan(query, context, tf_label, tf_key):
     if not top_coins:
         keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='shana_signals_menu')]]
         await query.edit_message_text(
-            f"✅ *{tf_label} — දැනට SHORT potential ඇති coins නැහැ*\n\n"
+            f"✅ *{tf_label} — NOW SHORT potential  coins NO*\n\n"
             "Market bullish/neutral trend එකේ. වෙන timeframe එකක් try කරන්න.",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
@@ -382,7 +384,7 @@ async def show_shana_coin_analysis(query, context, tf_key, coin_clean):
         msg += f"\n📊 *Volume:* `${ticker['quoteVolume']:.2f}`"
 
     msg += f"\n\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    msg += "\n_⚠️ 100% නිවැරදි නැහැ. Risk management use කරන්න._"
+    msg += "\n_⚠️ 70-90% SHUWER. Risk management use කරන්න._"
 
     keyboard = [
         [InlineKeyboardButton("🔄 Refresh", callback_data=f'shana_coin_{tf_key}_{coin_clean}')],
@@ -467,7 +469,7 @@ async def show_shana_signal_journey(query, context, tf_key, coin_clean):
 # 🟢 NOW GOOD COIN
 # ====================================================================
 async def show_best_coin(query):
-    msg = "🔍 *හොඳම SHORT coins සොයමින්...*\n\n"
+    msg = "🔍 *GOOD BAINANCE  coins PENDIN...*\n\n"
     await query.edit_message_text(msg, parse_mode='Markdown')
 
     try:
@@ -492,7 +494,7 @@ async def show_best_coin(query):
         )
         return
 
-    msg = "🏆 *NOW GOOD SHORT COINS* 🏆\n\n"
+    msg = "🏆 *NOW GOOD BINANCE COINS* 🏆\n\n"
     for i, coin_data in enumerate(top_coins):
         score_bar = generate_colored_bar(min(coin_data['score'], 100), 8)
         reasons = ', '.join(coin_data['reasons'][:3]) if coin_data.get('reasons') else 'Analysis in progress'
@@ -504,7 +506,7 @@ async def show_best_coin(query):
             f"   📉 RSI: `{coin_data['rsi']:.1f}` | 24h: {change_emoji} `{change:+.2f}%`\n"
             f"   📌 {reasons}\n\n"
         )
-    msg += "_⚠️ 100% නිවැරදි නැහැ!_"
+    msg += "_⚠️ 70-90% SHUWER_"
 
     keyboard = [
         [InlineKeyboardButton("🔄 Refresh", callback_data='best_coin')],
@@ -522,7 +524,7 @@ async def show_best_coin(query):
 # 🕹️ LIVE PRICE — හැම Coin එකම
 # ====================================================================
 async def show_prices(query):
-    msg = "🟢 *LIVE PRICE — හැම Coin එකම* 🟢\n\n"
+    msg = "🟢 *LIVE PRICE * 🟢\n\n"
     msg += "⏳ *Prices loading...*"
     await query.edit_message_text(msg, parse_mode='Markdown')
 
@@ -554,7 +556,7 @@ async def show_prices(query):
         "╔════════════════════════════════════════════════════╗",
         "║        🟢 LIVE PRICE — ALL 50 COINS 🟢            ║",
         "╠════════════════════════════════════════════════════╣",
-        "║  #  │  Coin       │  Price       │  24h%    │ Vol ║",
+        "║  #  │  Coin       │  Price       │  LIVE🚀    │ Vol ║",
         "╠════════════════════════════════════════════════════╣"
     ]
 
