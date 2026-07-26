@@ -21,16 +21,21 @@ signal_history = []
 auto_signal_running = True
 
 # ============ WELCOME IMAGE ============
-# 📌 ඔබගේ Welcome Image එක මෙතන set කරන්න (local file path හෝ URL)
-# Example: "welcome.jpg"  (local file)  or  "https://example.com/welcome.jpg"  (URL)
-WELCOME_IMAGE = "welcome.jpg"  # ← මෙය ඔබගේ image path/URL එකට වෙනස් කරන්න!
+WELCOME_IMAGE = "welcome.jpg"
 
 
-# ============ NEW: WELCOME + MENU SYSTEM ============
+# ============ NEW: Progress Bar Helper ============
+def generate_progress_bar(percentage, length=10):
+    """විසුවල් progress bar එකක් හදන්න █░"""
+    filled = int(min(percentage, 100) / 100 * length)
+    bar = '█' * filled + '░' * (length - filled)
+    return bar
+
+
+# ============ WELCOME + MENU SYSTEM ============
 
 async def start(update, context):
     """Welcome message with Image + Menu button"""
-    # Welcome image එක send කරන්න (image එක නැත්නම් error නොදී text විතරක් යයි)
     try:
         if os.path.exists(WELCOME_IMAGE):
             with open(WELCOME_IMAGE, 'rb') as photo:
@@ -101,71 +106,47 @@ async def back_to_welcome(query):
     )
 
 
+# ============ FIXED: SHORT SIGNALS 5 MINUTE — ALL coins list ============
 async def show_short_signals_5min(query, context):
-    """SHORT signals with detailed entry/SL/TP info + pagination"""
-    msg = "🔍 *SHORT Signals සොයමින්...*\n\n"
+    """SHORT SIGNALS 5 MINUTE — ALL coins ranked by short potential with buttons"""
+    msg = "🔍 *SHORT potential සොයමින්...*\n\n"
     await query.edit_message_text(msg, parse_mode='Markdown')
-
-    signals = []
-    for coin in user_coins:
-        sig = analyzer.find_short_signal(coin)
-        if sig:
-            signals.append(sig)
-        await asyncio.sleep(0.2)
-
-    if not signals:
+    
+    # ALL coins එක scan කරලා short potential අනුව rank කරන්න
+    top_coins = analyzer.get_top_short_coins(limit=25)
+    
+    if not top_coins:
         keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
         await query.edit_message_text(
-            "✅ *දැනට SHORT signal නැහැ*\n\n"
-            "Market bullish trend එකේ.",
+            "✅ *දැනට SHORT potential ඇති coins නැහැ*\n\n"
+            "Market bullish/neutral trend එකේ.",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
-
-    signals.sort(key=lambda x: x['confidence'], reverse=True)
-
-    # Store signals in chat_data for pagination
-    context.chat_data['signal_list'] = signals
-    page = context.chat_data.get('signal_page', 0)
-    total = len(signals)
-
-    if page < 0:
-        page = 0
-        context.chat_data['signal_page'] = 0
-    elif page >= total:
-        page = total - 1
-        context.chat_data['signal_page'] = total - 1
-
-    sig = signals[page]
-
-    msg = (
-        f"🔴 *SHORT SIGNAL* ({page+1}/{total})\n\n"
-        f"📉 *Coin:* `{sig['symbol']}`\n"
-        f"⚡ *Confidence:* `{sig['confidence']}%`\n"
-        f"📊 *RSI:* `{sig['rsi']:.1f}`\n\n"
-        f"💰 *Entry Price:*\n`{sig['entry']:.8f}`\n\n"
-    )
-    if 'take_profit_1' in sig:
-        msg += f"🎯 *Take Profit (TP1):*\n`{sig['take_profit_1']:.8f}`\n"
-    if 'take_profit_2' in sig:
-        msg += f"🎯 *Take Profit (TP2):*\n`{sig['take_profit_2']:.8f}`\n"
-    msg += f"\n🛑 *Stop Loss:*\n`{sig['stop_loss']:.8f}`\n\n"
-    if 'reasons' in sig and sig['reasons']:
-        msg += f"📌 *Reasons:*\n{', '.join(sig['reasons'][:3])}\n"
-    msg += f"\n⏰ {sig.get('timestamp', 'N/A')}\n\n"
-    msg += "_⚠️ 100% නිවැරදි නැහැ!_"
-
+    
+    # Store in context for later use
+    context.chat_data['top_short_coins'] = top_coins
+    
+    msg = "🔴 *SHORT SIGNALS 5 MINUTE*\n\n"
+    msg += "👇 *Coin එකක් click කරන්න full analysis බලන්න:*\n\n"
+    
     keyboard = []
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton("◀️ Previous", callback_data='prev_signal'))
-    if page < total - 1:
-        nav_row.append(InlineKeyboardButton("Next ▶️", callback_data='next_signal'))
-    if nav_row:
-        keyboard.append(nav_row)
+    for coin_data in top_coins[:15]:  # Max 15 coins per page
+        score = coin_data['score']
+        score_bar = generate_progress_bar(min(score, 100))
+        reasons = ', '.join(coin_data['reasons'][:2]) if coin_data.get('reasons') else ''
+        
+        coin_clean = coin_data['symbol'].replace('/', '')
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{coin_data['symbol']}  {score_bar}  {score}%  |  {reasons}",
+                callback_data=f'shortcoin_{coin_clean}'
+            )
+        ])
+    
     keyboard.append([InlineKeyboardButton("⬅️ BACK", callback_data='menu')])
-
+    
     await query.edit_message_text(
         msg,
         parse_mode='Markdown',
@@ -173,47 +154,220 @@ async def show_short_signals_5min(query, context):
     )
 
 
-# ============ EXISTING HANDLERS (modified only with Back buttons) ============
+# ============ NEW: Coin එකක full short analysis + Live WIN% ============
+async def show_coin_short_analysis(query, context, coin_clean):
+    """Show full SHORT analysis + live WIN% for selected coin"""
+    # Convert BTCUSDT -> BTC/USDT
+    full_symbol = coin_clean
+    if '/' not in full_symbol:
+        for c in COINS:
+            if c.replace('/', '') == coin_clean:
+                full_symbol = c
+                break
+        else:
+            # Try common pattern
+            for c in user_coins:
+                if c.replace('/', '') == coin_clean:
+                    full_symbol = c
+                    break
+    
+    msg = f"🔍 *Analyzing {full_symbol}...*\n\n"
+    await query.edit_message_text(msg, parse_mode='Markdown')
+    
+    # Try to get full signal
+    signal = analyzer.find_short_signal(full_symbol)
+    
+    # Get live tracking data
+    live_data = analyzer.get_live_signal_percentage(full_symbol, 'SHORT')
+    
+    # Quick analysis data
+    quick = analyzer.analyze_coin_for_short(full_symbol)
+    
+    msg = f"🔴 *SHORT ANALYSIS — {full_symbol}*\n\n"
+    
+    if signal:
+        msg += (
+            f"💰 *Entry:* `{signal['entry']:.8f}`\n"
+            f"🎯 *TP1:* `{signal['take_profit_1']:.8f}`\n"
+            f"🎯 *TP2:* `{signal['take_profit_2']:.8f}`\n"
+            f"🛑 *SL:* `{signal['stop_loss']:.8f}`\n"
+            f"⚡ *Confidence:* `{signal['confidence']}%`\n"
+            f"🔍 *Strict Filters:* `{signal.get('strict_filters', 0)}/5`\n\n"
+        )
+    
+    if quick:
+        msg += (
+            f"📊 *Quick Score:* `{quick['score']}%`\n"
+            f"📉 *RSI:* `{quick['rsi']:.1f}`\n"
+            f"📌 *Signals:* {', '.join(quick['reasons'][:4])}\n"
+        )
+        if signal:
+            msg += f"📊 *Volume Ratio:* `{signal.get('volume_ratio', 0):.2f}x`\n"
+            msg += f"📊 *ADX:* `{signal.get('adx', 0):.1f}`\n"
+        msg += "\n"
+    
+    # LIVE WIN/LOSS TRACKING
+    if live_data:
+        if live_data['status'] == 'WIN':
+            status_emoji = "🏆"
+            status_text = "WIN ✅"
+        elif live_data['status'] == 'LOST':
+            status_emoji = "💀"
+            status_text = "LOST ❌"
+        elif live_data['status'] == 'ACTIVE':
+            status_emoji = "⏳"
+            status_text = "ACTIVE"
+        else:
+            status_emoji = "⏸️"
+            status_text = live_data['status']
+        
+        bar = generate_progress_bar(live_data['win_percentage'])
+        msg += (
+            f"━━━ *LIVE TRACKING* ━━━\n"
+            f"{status_emoji} *Status:* `{status_text}`\n"
+            f"📊 *WIN %:* `{live_data['win_percentage']:.1f}%`\n"
+            f"`{bar}`\n"
+            f"💵 *Current:* `{live_data['current_price']:.8f}`\n"
+            f"💰 *Entry:* `{live_data['entry']:.8f}`\n"
+            f"🎯 *TP:* `{live_data['tp1']:.8f}`\n"
+            f"🛑 *SL:* `{live_data['sl']:.8f}`\n"
+        )
+    else:
+        msg += "📊 *No active signal to track.*\n"
+        if signal:
+            msg += "_Signal sent — tracking started._\n"
+        else:
+            msg += "_Strict conditions නැති නිසා full signal එකක් නැහැ._\n"
+    
+    # Live price
+    ticker = analyzer.get_ticker(full_symbol)
+    if ticker:
+        change = ticker['percentage']
+        emoji = "🟢" if float(change) > 0 else "🔴"
+        msg += f"\n📊 *24h Change:* {emoji} `{change:+.2f}%`"
+    
+    msg += f"\n\n⏰ {datetime.now().strftime('%H:%M:%S')}"
+    msg += "\n_⚠️ 100% නිවැරදි නැහැ!_"
+    
+    keyboard = [
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f'refresh_{coin_clean}')],
+        [InlineKeyboardButton("⬅️ BACK", callback_data='short_signals_5min')]
+    ]
+    
+    await query.edit_message_text(
+        msg,
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
+
+# ============ FIXED: NOW GOOD COIN — SHORT coins විතරක් ============
+async def show_best_coin(query):
+    """හොඳම SHORT coins පමණක් — ඉහළම 5"""
+    msg = "🔍 *හොඳම SHORT coins සොයමින්...*\n\n"
+    await query.edit_message_text(msg, parse_mode='Markdown')
+    
+    top_coins = analyzer.get_top_short_coins(limit=5)
+    
+    if not top_coins:
+        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
+        await query.edit_message_text(
+            "😴 *දැනට trade එකට හොඳ SHORT coin එකක් නැහැ*\n\n"
+            "Market range එකේ. විනාඩි 2කින් try කරන්න.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    msg = "🏆 *NOW GOOD SHORT COINS* 🏆\n\n"
+    for i, coin_data in enumerate(top_coins):
+        score_bar = generate_progress_bar(min(coin_data['score'], 100))
+        reasons = ', '.join(coin_data['reasons'][:3]) if coin_data.get('reasons') else 'Analysis in progress'
+        change = coin_data.get('change_24h', 0)
+        change_emoji = "🟢" if change >= 0 else "🔴"
+        msg += (
+            f"{i+1}. *{coin_data['symbol']}*\n"
+            f"   Score: `{score_bar}` `{coin_data['score']}%`\n"
+            f"   RSI: `{coin_data['rsi']:.1f}` | 24h: {change_emoji} `{change:+.2f}%`\n"
+            f"   📌 {reasons}\n\n"
+        )
+    msg += "_⚠️ 100% නිවැරදි නැහැ!_"
+    
+    keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
+    await query.edit_message_text(
+        msg,
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# ============ UPDATED: Button Handler — new callbacks added ============
 async def button_handler(update, context):
     query = update.callback_query
     await query.answer()
 
     if query.data == 'menu':
         await show_menu(query)
+    
     elif query.data == 'back_to_welcome':
         await back_to_welcome(query)
+    
+    # SHORT SIGNALS 5 MINUTE — coin list
     elif query.data == 'short_signals_5min':
         context.chat_data['signal_page'] = 0
         await show_short_signals_5min(query, context)
+    
+    # Coin click from SHORT SIGNALS list
+    elif query.data.startswith('shortcoin_'):
+        coin_clean = query.data.replace('shortcoin_', '')
+        await show_coin_short_analysis(query, context, coin_clean)
+    
+    # Refresh coin analysis
+    elif query.data.startswith('refresh_'):
+        coin_clean = query.data.replace('refresh_', '')
+        await show_coin_short_analysis(query, context, coin_clean)
+    
     elif query.data == 'next_signal':
         context.chat_data['signal_page'] = context.chat_data.get('signal_page', 0) + 1
         await show_short_signals_5min(query, context)
+    
     elif query.data == 'prev_signal':
         context.chat_data['signal_page'] = context.chat_data.get('signal_page', 0) - 1
         await show_short_signals_5min(query, context)
+    
     elif query.data == 'prices':
         await show_prices(query)
+    
     elif query.data == 'best_coin':
         await show_best_coin(query)
+    
     elif query.data == 'short_signals':
         await show_short_signals(query)
+    
     elif query.data == 'long_signals':
         await show_long_signals(query)
+    
     elif query.data == 'select_coins':
         await show_coin_selector(query)
+    
     elif query.data == 'toggle_auto':
         await toggle_auto_signal(query)
+    
     elif query.data == 'stats':
         await show_stats(query)
+    
     elif query.data.startswith('coin_'):
         coin = query.data.replace('coin_', '')
         await toggle_coin(query, coin)
+    
     elif query.data == 'refresh_prices':
         await show_prices(query)
+    
     elif query.data == 'refresh_signals':
         await show_short_signals(query)
 
+
+# ============ UNCHANGED: Existing handlers ============
 
 async def show_prices(query):
     """ලයිව් ප්‍රයිස් — Binance Direct REST"""
@@ -239,48 +393,8 @@ async def show_prices(query):
     await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 
-async def show_best_coin(query):
-    """හොඳම signal එක"""
-    msg = "🔍 *හොඳම කොයින් සොයමින්...*\n\n"
-    await query.edit_message_text(msg, parse_mode='Markdown')
-
-    results = []
-    for coin in user_coins:
-        short = analyzer.find_short_signal(coin)
-        if short:
-            results.append(('🔴 SHORT', short))
-        long = analyzer.find_long_signal(coin)
-        if long:
-            results.append(('🟢 LONG', long))
-        await asyncio.sleep(0.2)
-
-    if not results:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(
-            "😴 *දැනට signal එකක් නැහැ*\n\n"
-            "Market range එකේ. විනාඩි 2කින් try කරන්න.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    results.sort(key=lambda x: x[1]['confidence'], reverse=True)
-    msg = "🏆 *Top Signals (Binance)*\n\n"
-    for sig_type, sig in results[:5]:
-        msg += (
-            f"{sig_type} *{sig['symbol']}*\n"
-            f"   Entry: `${sig['entry']:.4f}`\n"
-            f"   TP1: `${sig['take_profit_1']:.4f}` | SL: `${sig['stop_loss']:.4f}`\n"
-            f"   Confidence: `{sig['confidence']}%` | RSI: `{sig['rsi']:.1f}`\n"
-            f"   📌 {', '.join(sig['reasons'][:2])}\n\n"
-        )
-    msg += "_⚠️ 100% නිවැරදි නැහැ!_"
-    keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-    await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-
-
 async def show_short_signals(query):
-    """SHORT signals"""
+    """SHORT signals (old — keep as is)"""
     msg = "🔍 *SHORT Signals සොයමින්...*\n\n"
     await query.edit_message_text(msg, parse_mode='Markdown')
 
