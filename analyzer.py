@@ -35,7 +35,6 @@ class BinanceAnalyzer:
         self.active_signals = {}
 
     def _load_signal_tracker(self):
-        """Previous signals load කරන්න (WIN/LOSS track කරන්න)"""
         try:
             if os.path.exists(self.signal_tracker_file):
                 with open(self.signal_tracker_file, 'r') as f:
@@ -47,7 +46,6 @@ class BinanceAnalyzer:
         return {}
 
     def _save_signal_tracker(self):
-        """Signal tracker save කරන්න"""
         try:
             if len(self.signal_tracker) > 500:
                 keys = sorted(self.signal_tracker.keys(), reverse=True)
@@ -254,17 +252,17 @@ class BinanceAnalyzer:
         return None
 
     def get_klines(self, symbol, timeframe="1m", limit=100):
-        """Binance එකෙන් OHLCV data ගන්න — FIXED: CCXT markets dict key"""
+        """Binance එකෙන් OHLCV data — FIXED: markets dict key = symbol (BTC/USDT)"""
         clean_symbol = symbol.replace("/", "")
 
         # Try CCXT first
         if self.exchange:
             try:
-                # === FIX: markets dict key එක symbol (BTC/USDT) විදියට දාන්න ===
+                # === FIX: key = symbol (BTC/USDT), id = clean_symbol (BTCUSDT) ===
                 self.exchange.markets = {
-                    symbol: {  # key = "BTC/USDT" (original format)
-                        "id": clean_symbol,     # "BTCUSDT" (exchange pair format)
-                        "symbol": symbol,       # "BTC/USDT"
+                    symbol: {
+                        "id": clean_symbol,
+                        "symbol": symbol,
                         "base": symbol.split("/")[0],
                         "quote": symbol.split("/")[1],
                         "active": True,
@@ -282,9 +280,8 @@ class BinanceAnalyzer:
                 return df
             except Exception as e:
                 logger.warning(f"CCXT fetch failed for {symbol}: {e}")
-                # Fall through to REST
 
-        # Direct REST API call
+        # Direct REST API
         try:
             base = getattr(self, '_base_url', 'https://api.binance.com')
             if not base:
@@ -356,7 +353,7 @@ class BinanceAnalyzer:
         df['mfi'] = ta.volume.money_flow_index(df['high'], df['low'], df['close'], df['volume'], window=14)
         df['eom'] = ta.volume.ease_of_movement(df['high'], df['low'], df['volume'], window=14)
         
-        # ===== MACD (FULL) =====
+        # ===== MACD =====
         macd = ta.trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9)
         df['macd'] = macd.macd()
         df['macd_signal'] = macd.macd_signal()
@@ -381,8 +378,6 @@ class BinanceAnalyzer:
         df['volume_ratio_5'] = df['volume'] / df['volume_sma_5']
         df['volume_ratio_10'] = df['volume'] / df['volume_sma_10']
         df['volume_ratio_20'] = df['volume'] / df['volume_sma_20']
-        
-        # OBV
         df['obv'] = ta.volume.on_balance_volume(df['close'], df['volume'])
         df['obv_sma'] = ta.trend.sma_indicator(df['obv'], window=20)
         df['obv_divergence'] = df['obv'] - df['obv_sma']
@@ -437,7 +432,7 @@ class BinanceAnalyzer:
         return df
 
     def find_short_signal(self, symbol):
-        """SHORT signal — 90-95% ACCURACY TARGET — FULL ANALYSIS"""
+        """SHORT signal — same as before"""
         df = self.get_klines(symbol, "1m", 200)
         if df is None or len(df) < 100:
             return None
@@ -451,11 +446,10 @@ class BinanceAnalyzer:
         weight_total = 0
         weight_hit = 0
 
-        # 1. RSI OVERBOUGHT (Weight: 12)
         if latest['rsi'] > RSI_OVERBOUGHT:
             rsi_excess = (latest['rsi'] - RSI_OVERBOUGHT) / (100 - RSI_OVERBOUGHT)
             score = min(12, 8 + (rsi_excess * 4))
-            signals.append(f"🔥 RSI Overbought: {latest['rsi']:.1f} (Strong)")
+            signals.append(f"🔥 RSI Overbought: {latest['rsi']:.1f}")
             confidence += score
             weight_hit += 12
         elif latest['rsi'] > 65:
@@ -464,14 +458,12 @@ class BinanceAnalyzer:
             weight_hit += 6
         weight_total += 12
 
-        # 2. RSI DIVERGENCE (Weight: 15)
         if df['bearish_div_rsi'].iloc[-1]:
-            signals.append(f"🚨 RSI Bearish Divergence Detected!")
+            signals.append(f"🚨 RSI Bearish Divergence!")
             confidence += 15
             weight_hit += 15
         weight_total += 15
 
-        # 3. EMA CROSSOVER (Weight: 10)
         if latest['close'] < latest['ema_12'] and prev['close'] >= prev['ema_12']:
             signals.append(f"📉 Price broke below EMA-12")
             confidence += 10
@@ -481,7 +473,6 @@ class BinanceAnalyzer:
             weight_hit += 3
         weight_total += 10
 
-        # 4. MULTIPLE EMA ALIGNMENT (Weight: 10)
         ema_bearish = (
             latest['close'] < latest['ema_5'] and
             latest['close'] < latest['ema_12'] and
@@ -489,69 +480,63 @@ class BinanceAnalyzer:
             latest['close'] < latest['ema_50']
         )
         if ema_bearish:
-            signals.append(f"📊 All EMAs Bearish (5/12/26/50)")
+            signals.append("📊 All EMAs Bearish")
             confidence += 10
             weight_hit += 10
         weight_total += 10
 
-        # 5. MACD BEARISH CROSSOVER (Weight: 15)
         if latest['macd'] < latest['macd_signal'] and prev['macd'] >= prev['macd_signal']:
-            signals.append(f"🚩 MACD Bearish Crossover (Strong)")
+            signals.append("🚩 MACD Bearish Crossover")
             confidence += 15
             weight_hit += 15
         elif latest['macd'] < latest['macd_signal']:
-            signals.append(f"📊 MACD Bearish")
+            signals.append("📊 MACD Bearish")
             confidence += 5
             weight_hit += 5
         weight_total += 15
 
-        # 6. MACD HISTOGRAM DECLINING (Weight: 5)
         if latest['macd_histogram'] < prev['macd_histogram'] and latest['macd_histogram'] < 0:
-            signals.append(f"📉 MACD Histogram declining negative")
+            signals.append("📉 MACD Histogram declining")
             confidence += 5
             weight_hit += 5
         weight_total += 5
 
-        # 7. BOLLINGER BANDS (Weight: 10)
         if latest['close'] >= latest['bb_upper'] * 0.98:
-            signals.append(f"💥 Price at Upper BB: {latest['close']:.4f}")
+            signals.append(f"💥 Price at Upper BB")
             confidence += 10
             weight_hit += 10
         elif latest['close'] >= latest['bb_upper_15'] * 0.98:
-            signals.append(f"⚡ Price at Upper BB(1.5)")
+            signals.append(f"⚡ Price at BB(1.5)")
             confidence += 6
             weight_hit += 6
         elif latest['bb_percent'] > 80:
-            signals.append(f"📊 BB % above 80: {latest['bb_percent']:.1f}%")
+            signals.append(f"📊 BB%: {latest['bb_percent']:.0f}%")
             confidence += 3
             weight_hit += 3
         weight_total += 10
 
-        # 8. VOLUME CONFIRMATION (Weight: 10)
         if latest['volume_ratio_5'] > VOLUME_THRESHOLD and not latest['is_bullish']:
-            signals.append(f"📈 High Sell Volume: {latest['volume_ratio_5']:.1f}x (5MA)")
+            signals.append(f"📈 High Sell Vol: {latest['volume_ratio_5']:.1f}x")
             confidence += 10
             weight_hit += 10
         elif latest['volume_ratio_10'] > VOLUME_THRESHOLD and not latest['is_bullish']:
-            signals.append(f"📊 High Sell Volume: {latest['volume_ratio_10']:.1f}x (10MA)")
+            signals.append(f"📊 High Sell Vol: {latest['volume_ratio_10']:.1f}x")
             confidence += 7
             weight_hit += 7
         weight_total += 10
 
-        # 9. BEARISH CANDLE PATTERN (Weight: 8)
         if latest['upper_wick'] > latest['body'] * 2 and not latest['is_bullish']:
-            signals.append(f"🕯️ Bearish rejection wick (Strong)")
+            signals.append("🕯️ Bearish rejection wick")
             confidence += 8
             weight_hit += 8
         elif latest['is_bearish'] and latest['body_percent'] > 60:
-            signals.append(f"🕯️ Strong bearish candle ({latest['body_percent']:.0f}% body)")
+            signals.append(f"🕯️ Bearish candle {latest['body_percent']:.0f}%")
             confidence += 5
             weight_hit += 5
         weight_total += 8
 
-        # 10. STOCHASTIC RSI OVERBOUGHT (Weight: 8)
         if latest['stoch_k'] > 80 and latest['stoch_d'] > 80:
-            signals.append(f"📊 StochRSI Overbought (K:{latest['stoch_k']:.0f}, D:{latest['stoch_d']:.0f})")
+            signals.append(f"📊 StochRSI Overbought")
             confidence += 8
             weight_hit += 8
         elif latest['stoch_k_reg'] > 80:
@@ -560,36 +545,32 @@ class BinanceAnalyzer:
             weight_hit += 4
         weight_total += 8
 
-        # 11. RESISTANCE TESTING (Weight: 10)
         if latest['close'] >= latest['resistance'] * 0.995:
-            signals.append(f"🧱 Testing Resistance: {latest['resistance']:.4f}")
+            signals.append(f"🧱 Testing Resistance")
             confidence += 10
             weight_hit += 10
         elif latest['close'] >= latest['resistance_50'] * 0.995:
-            signals.append(f"🧱 Testing Major Resistance(50): {latest['resistance_50']:.4f}")
+            signals.append(f"🧱 Major Resistance(50)")
             confidence += 8
             weight_hit += 8
         weight_total += 10
 
-        # 12. ADX TREND STRENGTH (Weight: 8)
         if latest['adx'] > 25 and latest['minus_di'] > latest['plus_di']:
-            signals.append(f"📊 Strong Downtrend (ADX:{latest['adx']:.0f})")
+            signals.append(f"📊 Strong Downtrend ADX:{latest['adx']:.0f}")
             confidence += 8
             weight_hit += 8
         elif latest['adx'] > 20 and latest['minus_di'] > latest['plus_di']:
-            signals.append(f"📊 Downtrend (ADX:{latest['adx']:.0f})")
+            signals.append(f"📊 Downtrend ADX:{latest['adx']:.0f}")
             confidence += 4
             weight_hit += 4
         weight_total += 8
 
-        # 14. WILLIAMS %R (Weight: 6)
         if latest['williams_r'] < -80:
-            signals.append(f"📊 Williams %R Oversold: {latest['williams_r']:.0f}")
+            signals.append(f"📊 Williams %R: {latest['williams_r']:.0f}")
             confidence += 6
             weight_hit += 6
         weight_total += 6
 
-        # 15. MFI (Weight: 6)
         if latest['mfi'] > 80:
             signals.append(f"📊 MFI Overbought: {latest['mfi']:.0f}")
             confidence += 6
@@ -599,35 +580,28 @@ class BinanceAnalyzer:
             weight_hit += 3
         weight_total += 6
 
-        # 16. KELTNER CHANNEL (Weight: 6)
         if latest['close'] >= latest['kc_upper']:
-            signals.append(f"📊 Price at Keltner Upper")
+            signals.append("📊 Price at Keltner Upper")
             confidence += 6
             weight_hit += 6
         weight_total += 6
 
-        # 17. AROON (Weight: 6)
         if latest['aroon_down'] > latest['aroon_up']:
             confidence += 3
             weight_hit += 3
         weight_total += 6
 
-        # 19. VOLUME PRICE TREND (Weight: 5)
         if latest['vpt'] < prev['vpt'] and latest['vpt'] < 0:
-            signals.append(f"📊 VPT declining (distribution)")
+            signals.append("📊 VPT declining")
             confidence += 5
             weight_hit += 5
         weight_total += 5
 
-        # ============ FINAL CALCULATION ============
         weighted_confidence = (confidence / weight_total) * 100 if weight_total > 0 else 0
 
-        min_signals = 8
         strict_filters_passed = 0
-        
         if latest['rsi'] > 60 or latest['stoch_k'] > 75:
             strict_filters_passed += 1
-        
         ema_count = sum([
             latest['close'] < latest['ema_12'],
             latest['close'] < latest['ema_26'],
@@ -636,50 +610,38 @@ class BinanceAnalyzer:
         ])
         if ema_count >= 2:
             strict_filters_passed += 1
-        
         if latest['macd'] < latest['macd_signal'] or latest['rsi'] > RSI_OVERBOUGHT:
             strict_filters_passed += 1
-        
         if latest['volume_ratio_5'] > 1.2 or latest['is_bearish']:
             strict_filters_passed += 1
-        
         if latest['close'] >= latest['resistance'] * 0.99 or latest['close'] >= latest['bb_upper'] * 0.97:
             strict_filters_passed += 1
 
-        if len(signals) >= min_signals and weighted_confidence >= 65 and strict_filters_passed >= 4:
+        if len(signals) >= 8 and weighted_confidence >= 65 and strict_filters_passed >= 4:
             atr = latest['atr']
             entry_price = latest['close']
-            
             atr_multiplier_tp = max(1.2, min(2.0, 1.5 - (weighted_confidence / 200)))
             atr_multiplier_sl = max(1.5, min(2.5, 2.0 - (weighted_confidence / 200)))
-            
             signal_result = {
-                'symbol': symbol,
-                'signal': 'SHORT',
-                'entry': entry_price,
+                'symbol': symbol, 'signal': 'SHORT', 'entry': entry_price,
                 'take_profit_1': entry_price - (atr * atr_multiplier_tp),
                 'take_profit_2': entry_price - (atr * (atr_multiplier_tp * 2)),
                 'stop_loss': entry_price + (atr * atr_multiplier_sl),
                 'confidence': min(99, int(weighted_confidence)),
                 'accuracy_score': min(99, int(weighted_confidence + (strict_filters_passed * 2))),
-                'strength': len(signals),
-                'reasons': signals,
-                'rsi': latest['rsi'],
-                'volume_ratio': latest['volume_ratio_5'],
-                'adx': latest['adx'],
-                'mfi': latest['mfi'],
+                'strength': len(signals), 'reasons': signals,
+                'rsi': latest['rsi'], 'volume_ratio': latest['volume_ratio_5'],
+                'adx': latest['adx'], 'mfi': latest['mfi'],
                 'bb_percent': latest['bb_percent'],
                 'strict_filters': strict_filters_passed,
                 'timestamp': datetime.now().isoformat()
             }
-            
             self.track_signal(signal_result)
             return signal_result
-        
         return None
 
     def find_long_signal(self, symbol):
-        """LONG signal — FIXED: volume_ratio -> volume_ratio_5"""
+        """LONG signal — volume_ratio -> volume_ratio_5"""
         df = self.get_klines(symbol, "1m", 100)
         if df is None or len(df) < 50:
             return None
@@ -720,12 +682,11 @@ class BinanceAnalyzer:
             return signal_result
         return None
 
+    # ============ NEW: Quick scan for SHORT coin list ============
     def analyze_coin_for_short(self, symbol):
         """
-        SHORT SIGNALS 5 MINUTE button එකට — 
-        Coin එකේ short potential එක quick scan කරලා 
-        score එකක් දෙනවා (analysis එක full එක නෙවෙයි)
-        Condition pass වෙන ගණන අනුව ranking
+        Coin එකක short potential එක ඉක්මනින් scan කරලා score එකක් දෙනවා.
+        SHORT SIGNALS 5 MINUTE list එකට use කරන්න.
         """
         try:
             df = self.get_klines(symbol, "5m", 100)
@@ -738,19 +699,14 @@ class BinanceAnalyzer:
             score = 0
             reasons = []
             
-            # RSI
             if latest['rsi'] > 65:
                 score += 15
                 reasons.append(f"RSI {latest['rsi']:.0f}")
             if latest['rsi'] > RSI_OVERBOUGHT:
                 score += 10
-            
-            # MACD
             if latest['macd'] < latest['macd_signal']:
                 score += 15
                 reasons.append("MACD Bearish")
-            
-            # EMAs
             ema_bearish_count = sum([
                 latest['close'] < latest['ema_5'],
                 latest['close'] < latest['ema_12'],
@@ -759,40 +715,27 @@ class BinanceAnalyzer:
             if ema_bearish_count >= 2:
                 score += 15
                 reasons.append(f"EMA×{ema_bearish_count}")
-            
-            # BB
             if latest['bb_percent'] > 70:
                 score += 10
                 reasons.append(f"BB% {latest['bb_percent']:.0f}")
-            
-            # Volume
             if latest['volume_ratio_5'] > 1.2 and not latest['is_bullish']:
                 score += 10
                 reasons.append("Vol Sell")
             elif latest['is_bearish']:
                 score += 5
-            
-            # Resistance
             if latest['close'] >= latest['resistance'] * 0.99:
                 score += 10
                 reasons.append("Resistance")
-            
-            # Stochastic
             if latest['stoch_k'] > 75:
                 score += 10
                 reasons.append("Stoch Over")
-            
-            # ADX
             if latest['adx'] > 20 and latest['minus_di'] > latest['plus_di']:
                 score += 10
                 reasons.append("ADX Down")
-            
-            # MFI
             if latest['mfi'] > 70:
                 score += 5
                 reasons.append("MFI High")
             
-            # Final
             ticker = self.get_ticker(symbol)
             if not ticker:
                 return None
@@ -803,7 +746,7 @@ class BinanceAnalyzer:
                 'change_24h': ticker['percentage'],
                 'volume_24h': ticker['quoteVolume'],
                 'score': score,
-                'reasons': reasons[:3],  # Top 3 reasons
+                'reasons': reasons[:3],
                 'rsi': latest['rsi'],
                 'timestamp': datetime.now().isoformat()
             }
@@ -813,10 +756,9 @@ class BinanceAnalyzer:
 
     def get_top_short_coins(self, limit=20):
         """
-        ALL Binance coins scan කරලා TOP SHORT coins list එක දෙනවා
-        SHORT SIGNALS 5 MINUTE button එකට use කරන්න
+        ALL Binance coins scan කරලා TOP SHORT coins list එක දෙනවා.
+        SHORT SIGNALS 5 MINUTE button එකට.
         """
-        # Major coins list + popular altcoins
         all_coins = [
             "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
             "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
@@ -829,14 +771,10 @@ class BinanceAnalyzer:
             "WAVES/USDT", "BAT/USDT", "ENJ/USDT", "CHZ/USDT", "GALA/USDT",
             "DYDX/USDT", "RUNE/USDT", "LDO/USDT", "GMX/USDT", "BLUR/USDT"
         ]
-        
         results = []
         for coin in all_coins:
             result = self.analyze_coin_for_short(coin)
-            if result and result['score'] >= 30:  # Minimum score threshold
+            if result and result['score'] >= 20:
                 results.append(result)
-        
-        # Sort by score descending
         results.sort(key=lambda x: x['score'], reverse=True)
-        
         return results[:limit]
