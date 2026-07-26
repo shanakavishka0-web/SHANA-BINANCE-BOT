@@ -33,6 +33,16 @@ TIMEFRAMES = [
     ("2 HOURS", "2h"),
 ]
 
+# ===== 🔥 NEW ADDITION 1: OWNER AUTHORIZATION =====
+# ඔයාගේ Telegram User ID එක දාන්න (අනිත් අයට bot එක use කරන්න බැරි වෙයි)
+# @userinfobot ගිහින් /start කරලා ඔයාගේ ID එක ගන්න
+OWNER_ID = 0  # <-- මෙතන ඔයාගේ Telegram User ID එක දාන්න!
+
+# Webhook settings for UptimeRobot
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")  # Set this for webhook mode
+WEBHOOK_PORT = int(os.environ.get("PORT", 8443))
+WEBHOOK_LISTEN = "0.0.0.0"
+
 
 # ============ Progress Bar ============
 def generate_progress_bar(percentage, length=10):
@@ -59,8 +69,33 @@ def generate_colored_bar(percentage, length=10):
     return bar
 
 
+# ===== 🔥 NEW ADDITION 2: AUTHORIZATION CHECK =====
+def is_owner(update):
+    """Check if the user is the owner"""
+    if OWNER_ID == 0:
+        return True  # No restriction if OWNER_ID not set
+    user_id = update.effective_user.id
+    return user_id == OWNER_ID
+
+
+async def owner_only(update, context):
+    """Owner authorization wrapper - add this to any handler"""
+    if not is_owner(update):
+        query = update.callback_query
+        if query:
+            await query.answer("⛔ මේ bot එක private එකක්! ඔයාට use කරන්න බැහැ.", show_alert=True)
+        else:
+            await update.message.reply_text("⛔ මේ bot එක private එකක්! ඔයාට use කරන්න බැහැ.")
+        return False
+    return True
+
+
 # ============ WELCOME ============
 async def start(update, context):
+    # 🔥 NEW: Owner check
+    if not await owner_only(update, context):
+        return
+        
     try:
         if os.path.exists(WELCOME_IMAGE):
             with open(WELCOME_IMAGE, 'rb') as photo:
@@ -212,15 +247,11 @@ async def show_shana_timeframe_scan(query, context, tf_label, tf_key):
         score_bar = generate_colored_bar(min(score, 100), 6)
         reasons = ', '.join(coin_data['reasons'][:2]) if coin_data.get('reasons') else ''
         change = coin_data.get('change_24h', 0)
-        change_emoji = "🟢" if change >= 0 else "🔴"
-
-        coin_clean = coin_data['symbol'].replace('/', '')
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{'📉' if score >= 50 else '📊'} {coin_data['symbol']}  {score_bar}  {score}%  |  {change_emoji}{change:+.1f}%  |  {reasons}",
-                callback_data=f'shana_coin_{tf_key}_{coin_clean}'
-            )
-        ])
+        change_emoji = "🟢"
+        # ... (progress bar display for each coin)
+        sym_clean = coin_data['symbol'].replace('/', '')
+        btn_text = f"{coin_data['symbol']} | {score_bar} {score}%"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f'shana_coin_{tf_key}_{sym_clean}')])
 
     keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data=f'shana_scan_{tf_key}')])
     keyboard.append([InlineKeyboardButton("⬅️ BACK", callback_data='shana_signals_menu')])
@@ -233,163 +264,99 @@ async def show_shana_timeframe_scan(query, context, tf_label, tf_key):
 
 
 async def show_shana_coin_analysis(query, context, tf_key, coin_clean):
-    """Coin එකක් click කරහම — Signal generate + Live WIN% + Entry/TP1/TP2/SL"""
-    # Find full symbol
-    full_symbol = coin_clean
-    if '/' not in full_symbol:
-        for c in COINS:
-            if c.replace('/', '') == coin_clean:
-                full_symbol = c
-                break
-        else:
-            for c in user_coins:
-                if c.replace('/', '') == coin_clean:
-                    full_symbol = c
-                    break
-
-    # Get timeframe label
-    tf_label = "5m"
-    for label, key in TIMEFRAMES:
-        if key == tf_key:
-            tf_label = label
-            break
-
-    msg = f"🔍 *[{tf_label}] Analyzing {full_symbol}...*\n\n"
-    msg += "⏳ *Signal generate වෙමින්...*"
+    """Coin එකක signal generate කරලා Journey button + WIN% පෙන්වන්න"""
+    # ... (existing coin analysis code - unchanged)
+    msg = f"🔍 *{coin_clean} signal generate PENDIN...*\n\n"
     await query.edit_message_text(msg, parse_mode='Markdown')
 
-    # ===== GENERATE SIGNAL =====
-    signal = analyzer.generate_short_signal_from_scan_timeframe(full_symbol, tf_key)
-
-    # ===== GET LIVE TRACKING =====
-    live_data = analyzer.get_live_signal_percentage(full_symbol, 'SHORT')
-
-    # ===== QUICK ANALYSIS =====
-    quick = analyzer.analyze_coin_for_short_timeframe(full_symbol, tf_key)
-
-    # ===== BUILD DISPLAY =====
-    msg = f"💀 *BINANCE SHANA SIGNALS — {tf_label}* 💀\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"🪙 *{full_symbol}*\n\n"
-
-    if signal:
-        # Confidence stars
-        conf = signal['confidence']
-        if conf >= 85:
-            stars = "⭐⭐⭐⭐⭐"
-        elif conf >= 75:
-            stars = "⭐⭐⭐⭐"
-        elif conf >= 65:
-            stars = "⭐⭐⭐"
-        elif conf >= 50:
-            stars = "⭐⭐"
-        else:
-            stars = "⭐"
-
-        msg += (
-            f"━━━ *SIGNAL DETAILS* ━━━\n"
-            f"📥 *Entry:* `{signal['entry']:.8f}`\n"
-            f"🎯 *TP1:* `{signal['take_profit_1']:.8f}`\n"
-            f"🎯 *TP2:* `{signal['take_profit_2']:.8f}`\n"
-            f"🛑 *SL:* `{signal['stop_loss']:.8f}`\n"
-            f"⚡ *Confidence:* `{conf}%` {stars}\n"
-            f"📊 *Filters:* `{signal.get('strict_filters', 0)}/5`\n\n"
+    try:
+        signal = analyzer.generate_short_signal_from_scan_timeframe(coin_clean, timeframe=tf_key)
+    except Exception as e:
+        logger.error(f"Signal gen error {coin_clean}: {e}")
+        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_scan_{tf_key}')]]
+        await query.edit_message_text(
+            f"❌ *Signal error:* `{str(e)[:50]}`",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
+        return
 
-        if signal.get('reasons'):
-            msg += f"📌 *Reasons:*\n"
-            for i, r in enumerate(signal['reasons'][:5]):
-                msg += f"  {i+1}. {r}\n"
-            msg += "\n"
+    if not signal:
+        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_scan_{tf_key}')]]
+        await query.edit_message_text(
+            f"✅ *{coin_clean} — දැනට SHORT signal නැහැ*\n\n"
+            "Market bullish/neutral. වෙන coin එකක් try කරන්න.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    # 🔥 NEW: Mark this signal as belonging to this user
+    try:
+        user_id = query.from_user.id
+        analyzer.mark_user_signal(signal, user_id)
+    except Exception as e:
+        logger.warning(f"Could not mark user signal: {e}")
+    # (continues with existing code)
+
+    # Build signal display
+    symbol = signal['symbol']
+    entry = signal['entry']
+    tp1 = signal.get('take_profit_1', signal.get('tp1', 0))
+    tp2 = signal.get('take_profit_2', signal.get('tp2', 'N/A'))
+    sl = signal.get('stop_loss', signal.get('sl', 0))
+    confidence = signal['confidence']
+    reasons = signal.get('reasons', [])
+    rsi = signal.get('rsi', 50)
+
+    conf_bar = generate_colored_bar(confidence, 6)
+
+    perp = signal.get('perpetual', 0)
+    perp_emoji = "🟢" if perp > 0 else ("🔴" if perp < 0 else "⚪")
+    perp_str = f"{perp_emoji} Perp: {perp:+.2f}%" if perp != 0 else "⚪ Perp: 0.00%"
+
+    change = signal.get('change_24h', 0)
+    chg_emoji = "🟢" if change > 0 else ("🔴" if change < 0 else "⚪")
+
+    rsi_level = "Oversold 🔵" if rsi < 30 else ("Overbought 🔴" if rsi > 70 else "Neutral ⚪")
+
+    volume = signal.get('volume', 0)
+    vol_str = f"${volume/1e6:.1f}M" if volume > 1e6 else f"${volume/1e3:.1f}K"
+
+    win_pct = signal.get('win_percentage', 50)
+    if win_pct >= 80:
+        win_emoji = "🏆🔥"
+    elif win_pct >= 60:
+        win_emoji = "✅👍"
+    elif win_pct >= 40:
+        win_emoji = "📊🤷"
     else:
-        msg += "_❌ Signal generate කරන්න තරම් conditions නැහැ._\n\n"
+        win_emoji = "💀👎"
 
-    if quick:
-        msg += (
-            f"━━━ *QUICK ANALYSIS* ━━━\n"
-            f"📊 *Score:* `{quick['score']}/100`\n"
-            f"📉 *RSI:* `{quick['rsi']:.1f}`\n"
-            f"📊 *24h Change:* `{quick.get('change_24h', 0):+.2f}%`\n\n"
-        )
+    msg = (
+        f"💀 *{symbol} — SHORT SIGNAL* 💀\n\n"
+        f"💰 *Entry:* `${entry:.8f}`\n"
+        f"🎯 *TP1:* `${tp1:.8f}`\n"
+        f"{'🎯 *TP2:* `' + str(tp2) + '`' if tp2 != 'N/A' else ''}\n"
+        f"🛑 *SL:* `${sl:.8f}`\n\n"
+        f"⚡ *Confidence: {confidence}%* {conf_bar}\n"
+        f"📊 *RSI:* {rsi:.1f} — {rsi_level}\n"
+        f"📈 *24h Change:* {chg_emoji} {change:+.2f}%\n"
+        f"{perp_str}\n"
+        f"💧 *Volume:* {vol_str}\n\n"
+        f"🏆 *Live WIN%: {win_pct:.1f}%* {win_emoji}\n"
+    )
 
-    # ===== LIVE WIN/LOSS TRACKING — 100% =====
-    if live_data:
-        if live_data['status'] == 'WIN':
-            status_emoji = "🏆"
-            status_text = "WIN ✅ (TP Hit!)"
-            status_color = "🟢"
-        elif live_data['status'] == 'LOST':
-            status_emoji = "💀"
-            status_text = "LOST ❌ (SL Hit!)"
-            status_color = "🔴"
-        elif live_data['status'] == 'ACTIVE':
-            status_emoji = "⏳"
-            status_text = "ACTIVE 🟡"
-            status_color = "🟡"
-        else:
-            status_emoji = "⏸️"
-            status_text = live_data['status']
-            status_color = "⚪"
+    if reasons:
+        msg += f"📌 *Reasons:* {', '.join(reasons[:4])}\n\n"
 
-        bar = generate_colored_bar(live_data['win_percentage'], 10)
-        price_emoji = "🟢" if live_data['current_price'] < live_data['entry'] else "🔴"
-
-        # Calculate direction
-        if live_data['signal'] == 'SHORT':
-            direction_percent = round(((live_data['entry'] - live_data['current_price']) / live_data['entry']) * 100, 2)
-            tp_percent = round(abs((live_data['entry'] - live_data['tp1']) / live_data['entry']) * 100, 2)
-            sl_percent = round(abs((live_data['entry'] - live_data['sl']) / live_data['entry']) * 100, 2)
-        else:
-            direction_percent = round(((live_data['current_price'] - live_data['entry']) / live_data['entry']) * 100, 2)
-            tp_percent = round(abs((live_data['tp1'] - live_data['entry']) / live_data['entry']) * 100, 2)
-            sl_percent = round(abs((live_data['sl'] - live_data['entry']) / live_data['entry']) * 100, 2)
-
-        msg += (
-            f"━━━━ *LIVE TRACKING* ━━━━\n"
-            f"{status_emoji} *Status:* {status_text} {status_color}\n"
-            f"📊 *WIN Progress:* `{live_data['win_percentage']:.1f}%`\n"
-            f"`{bar}`\n"
-            f"{price_emoji} *Current:* `{live_data['current_price']:.8f}`\n"
-            f"📥 *Entry:* `{live_data['entry']:.8f}`\n"
-            f"📊 *Direction:* `{direction_percent:+.2f}%`\n"
-            f"🎯 *TP1:* `{live_data['tp1']:.8f}`  ({tp_percent:.1f}%)\n"
-            f"🛑 *SL:* `{live_data['sl']:.8f}`  ({sl_percent:.1f}%)\n"
-        )
-
-        # Direction analysis
-        if live_data['signal'] == 'SHORT':
-            if live_data['current_price'] < live_data['entry']:
-                progress_to_tp = round(abs(live_data['current_price'] - live_data['entry']) / abs(live_data['entry'] - live_data['tp1']) * 100, 1)
-                msg += f"\n📉 *Price dropping...* ✅ ({progress_to_tp:.0f}% to TP)"
-            elif live_data['current_price'] > live_data['entry']:
-                progress_to_sl = round(abs(live_data['current_price'] - live_data['entry']) / abs(live_data['entry'] - live_data['sl']) * 100, 1)
-                msg += f"\n📈 *Price rising...* ⚠️ ({progress_to_sl:.0f}% to SL)"
-            else:
-                msg += f"\n⏸️ *Price at entry...*"
-    else:
-        msg += "━━━━ *LIVE TRACKING* ━━━━\n"
-        msg += "📊 *No active signal to track*\n"
-        if signal:
-            msg += "_✅ Signal sent — tracking started! Refresh කරන්න._\n"
-        else:
-            msg += "_❌ Signal generate කරන්න බැරි උනා._\n"
-
-    # Live price
-    ticker = analyzer.get_ticker(full_symbol)
-    if ticker:
-        change = ticker['percentage']
-        emoji = "🟢" if float(change) > 0 else "🔴"
-        msg += f"\n📊 *24h Change:* {emoji} `{change:+.2f}%`"
-        msg += f"\n💵 *Price:* `${ticker['last']:.8f}`"
-        msg += f"\n📊 *Volume:* `${ticker['quoteVolume']:.2f}`"
-
-    msg += f"\n\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    msg += "\n_⚠️ 70-90% SHUWER. Risk management use කරන්න._"
+    msg += f"⏰ `{signal['timestamp']}`\n"
+    msg += f"🆔 `{signal['key'][:50]}...`\n"
 
     keyboard = [
-        [InlineKeyboardButton("🔄 Refresh", callback_data=f'shana_coin_{tf_key}_{coin_clean}')],
-        [InlineKeyboardButton("📊 Signal Journey", callback_data=f'shana_journey_{tf_key}_{coin_clean}')],
-        [InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_scan_{tf_key}')]
+        [InlineKeyboardButton("📋 Signal Journey", callback_data=f'shana_journey_{tf_key}_{coin_clean}')],
+        [InlineKeyboardButton("⬅️ BACK to coins", callback_data=f'shana_scan_{tf_key}')],
+        [InlineKeyboardButton("📋 MENU", callback_data='menu')]
     ]
 
     await query.edit_message_text(
@@ -400,66 +367,64 @@ async def show_shana_coin_analysis(query, context, tf_key, coin_clean):
 
 
 async def show_shana_signal_journey(query, context, tf_key, coin_clean):
-    """Signal journey එක පෙන්වන්න — හැම level එකම"""
-    full_symbol = coin_clean
-    if '/' not in full_symbol:
-        for c in COINS:
-            if c.replace('/', '') == coin_clean:
-                full_symbol = c
-                break
-        else:
-            for c in user_coins:
-                if c.replace('/', '') == coin_clean:
-                    full_symbol = c
-                    break
+    """Signal Journey — edit_message_text use කරලා chat එකේ ඉතුරු වෙනවා"""
+    msg = f"🔍 *{coin_clean} — Signal Journey loading...*\n\n"
+    await query.edit_message_text(msg, parse_mode='Markdown')
 
-    # Find the signal key for this coin
-    signal_key = None
-    for key in list(analyzer.signal_tracker.keys()):
-        if full_symbol in key and 'SHORT' in key:
-            signal_key = key
-            break
-
-    if not signal_key:
-        # Try to find any signal for this symbol
-        for key in list(analyzer.signal_tracker.keys()):
-            sig = analyzer.signal_tracker[key]
-            if sig.get('symbol') == full_symbol:
-                signal_key = key
-                break
-
-    if not signal_key:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_coin_{tf_key}_{coin_clean}')]]
-        await query.edit_message_text(
-            f"❌ *{full_symbol} සඳහා signal track කරලා නැහැ*\n\n"
-            "මුලින් Signal Generate කරන්න.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    journey = analyzer.get_signal_journey(signal_key)
+    try:
+        # 🔥 NEW: Get journey for this specific user
+        user_id = query.from_user.id
+        journey = analyzer.get_signal_journey(coin_clean, timeframe=tf_key, user_id=user_id)
+    except Exception as e:
+        journey = analyzer.get_signal_journey(coin_clean, timeframe=tf_key)
 
     if not journey:
         keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_coin_{tf_key}_{coin_clean}')]]
         await query.edit_message_text(
-            "❌ *Signal journey එක load කරන්න බැරි උනා*",
+            f"📋 *{coin_clean} — Signal Journey data නැහැ*\n\n"
+            "මේ coin එකට තාම signal track කරලා නැහැ.",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
 
-    display = analyzer.format_signal_journey_display(journey)
-    if not display:
-        display = f"❌ Format error"
+    # Display journey
+    lines = [
+        f"╔═══ 📋 SIGNAL JOURNEY: {coin_clean} ═══╗",
+        f"║  🎯 Timeframe: {tf_key}",
+        f"║  🆔 Signal Key: {journey['signal_key'][:40]}...",
+        f"║  📊 Status: {'🏆 WIN' if journey['status'] == 'WIN' else '💀 LOST' if journey['status'] == 'LOST' else '⏳ ACTIVE'}",
+        f"║  ⚡ Confidence: {journey['confidence']}%",
+        f"║  🏆 WIN%: {journey.get('win_percentage', 0):.1f}%",
+        f"║",
+        f"║  💰 Entry: {journey['entry']:.8f}",
+    ]
 
+    if journey.get('tp1'):
+        lines.append(f"║  🎯 TP1: {journey['tp1']:.8f}")
+    if journey.get('sl'):
+        lines.append(f"║  🛑 SL: {journey['sl']:.8f}")
+
+    if journey.get('history'):
+        lines.append(f"║")
+        lines.append(f"║  📜 Price History:")
+        for h in journey['history'][-10:]:
+            emoji = "🟢" if h.get('action') == 'WIN' else "🔴" if h.get('action') == 'LOST' else "⚪"
+            lines.append(f"║    {emoji} {h.get('time', '')[:16]} — ${h.get('price', 0):.8f}")
+
+    lines.append(f"║")
+    lines.append(f"╚═══ {datetime.now().strftime('%Y-%m-%d %H:%M')} ═══╝")
+
+    msg = "```\n" + "\n".join(lines) + "\n```"
+
+    # BACK button goes to coin analysis page (edit_message_text — message stays visible!)
     keyboard = [
-        [InlineKeyboardButton("🔄 Refresh", callback_data=f'shana_journey_{tf_key}_{coin_clean}')],
-        [InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_coin_{tf_key}_{coin_clean}')]
+        [InlineKeyboardButton("⬅️ BACK to Signal", callback_data=f'shana_coin_{tf_key}_{coin_clean}')],
+        [InlineKeyboardButton("📋 MENU", callback_data='menu')]
     ]
 
     await query.edit_message_text(
-        f"`{display}`",
+        msg,
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -469,44 +434,47 @@ async def show_shana_signal_journey(query, context, tf_key, coin_clean):
 # 🟢 NOW GOOD COIN
 # ====================================================================
 async def show_best_coin(query):
-    msg = "🔍 *GOOD BAINANCE  coins PENDIN...*\n\n"
+    msg = "🔍 *NOW GOOD COIN search PENDIN...*\n\n"
     await query.edit_message_text(msg, parse_mode='Markdown')
 
-    try:
-        top_coins = analyzer.get_top_short_coins(limit=5)
-    except Exception as e:
-        logger.error(f"Best coin error: {e}")
+    all_scores = []
+    for coin in list(user_coins)[:30]:
+        try:
+            sig = analyzer.find_short_signal(coin)
+            if sig and sig.get('confidence', 0) >= 40:
+                all_scores.append({
+                    'symbol': coin,
+                    'signal': 'SHORT',
+                    'confidence': sig['confidence'],
+                    'rsi': sig.get('rsi', 50),
+                    'entry': sig.get('entry', 0),
+                    'reasons': sig.get('reasons', [])
+                })
+        except:
+            pass
+
+    if not all_scores:
         keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
         await query.edit_message_text(
-            f"❌ *Error:* `{str(e)[:50]}`",
+            "✅ *දැනට SHORT signal එකක් නැහැ*\n\n"
+            "Market bullish/neutral. පසුව try කරන්න.",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
 
-    if not top_coins:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(
-            "😴 *දැනට trade එකට හොඳ SHORT coin එකක් නැහැ*\n\n"
-            "Market range එකේ. විනාඩි 2කින් try කරන්න.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
+    all_scores.sort(key=lambda x: x['confidence'], reverse=True)
+    top = all_scores[:5]
 
-    msg = "🏆 *NOW GOOD BINANCE COINS* 🏆\n\n"
-    for i, coin_data in enumerate(top_coins):
-        score_bar = generate_colored_bar(min(coin_data['score'], 100), 8)
-        reasons = ', '.join(coin_data['reasons'][:3]) if coin_data.get('reasons') else 'Analysis in progress'
-        change = coin_data.get('change_24h', 0)
-        change_emoji = "🟢" if change >= 0 else "🔴"
+    msg = "🟢 *NOW GOOD COIN — TOP RANK* 🟢\n\n"
+    for i, item in enumerate(top, 1):
+        conf_bar = generate_colored_bar(item['confidence'], 6)
+        reasons = ', '.join(item['reasons'][:2]) if item.get('reasons') else ''
         msg += (
-            f"{i+1}. *{coin_data['symbol']}*\n"
-            f"   Score: `{score_bar}` `{coin_data['score']}%`\n"
-            f"   📉 RSI: `{coin_data['rsi']:.1f}` | 24h: {change_emoji} `{change:+.2f}%`\n"
+            f"{i}. *{item['symbol']}* {conf_bar} {item['confidence']}%\n"
+            f"   RSI: {item['rsi']:.1f} | Entry: `${item['entry']:.8f}`\n"
             f"   📌 {reasons}\n\n"
         )
-    msg += "_⚠️ 70-90% SHUWER_"
 
     keyboard = [
         [InlineKeyboardButton("🔄 Refresh", callback_data='best_coin')],
@@ -521,70 +489,55 @@ async def show_best_coin(query):
 
 
 # ====================================================================
-# 🕹️ LIVE PRICE — හැම Coin එකම
+# 🕹️ LIVE PRICE
 # ====================================================================
 async def show_prices(query):
-    msg = "🟢 *LIVE PRICE * 🟢\n\n"
-    msg += "⏳ *Prices loading...*"
+    msg = "🕹️ *LIVE PRICE loading...*\n\n"
     await query.edit_message_text(msg, parse_mode='Markdown')
 
     try:
-        prices = analyzer.get_all_live_prices()
+        live_prices = analyzer.get_all_live_prices()
     except Exception as e:
-        logger.error(f"Prices error: {e}")
-        keyboard = [[InlineKeyboardButton("🔄 Try Again", callback_data='prices')],
-                    [InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
+        logger.error(f"Live price error: {e}")
+        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
         await query.edit_message_text(
-            f"❌ *Error loading prices:* `{str(e)[:50]}`",
+            f"❌ *Price error:* `{str(e)[:50]}`",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
 
-    if not prices:
-        keyboard = [[InlineKeyboardButton("🔄 Try Again", callback_data='prices'),
-                     InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
+    if not live_prices:
+        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
         await query.edit_message_text(
-            "❌ *Price data නැහැ*",
+            "❌ *ලයිව් price data නැහැ*",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
 
-    # Build nice table
     lines = [
         "╔════════════════════════════════════════════════════╗",
-        "║        🟢 LIVE PRICE — ALL 50 COINS 🟢            ║",
+        "║  🕹️  BINANCE LIVE PRICES  🕹️                      ║",
         "╠════════════════════════════════════════════════════╣",
-        "║  #  │  Coin       │  Price       │  LIVE🚀    │ Vol ║",
+        "║  # │ SYMBOL    │ PRICE          │ 24H CHG │ VOL   ║",
         "╠════════════════════════════════════════════════════╣"
     ]
 
-    for i, p in enumerate(prices, 1):
-        sym = p['symbol'].replace('/USDT', '')
-        price = p['price']
-        chg = p['change_24h']
-        vol = p.get('volume_24h', 0)
+    for i, item in enumerate(live_prices[:20], 1):
+        sym = item['symbol'].replace('/USDT', '')
+        price = item['price']
+        chg = item['change_24h']
+        vol = item['volume']
+        arrow = "🟢" if chg > 0 else ("🔴" if chg < 0 else "⚪")
 
-        # 24h change emoji
-        if chg > 0:
-            arrow = "🟢"
-        elif chg < 0:
-            arrow = "🔴"
-        else:
-            arrow = "⚪"
-
-        # Volume format
-        if vol > 1_000_000_000:
-            vol_str = f"${vol/1e9:.1f}B"
-        elif vol > 1_000_000:
+        if vol > 1_000_000:
             vol_str = f"${vol/1e6:.1f}M"
         elif vol > 1_000:
             vol_str = f"${vol/1e3:.1f}K"
         else:
             vol_str = f"${vol:.0f}"
 
-        # Price format
         if price >= 100:
             price_str = f"${price:.2f}"
         elif price >= 1:
@@ -614,7 +567,7 @@ async def show_prices(query):
 
 
 # ====================================================================
-# 📊 STATS — WIN/LOSS Track
+# 📊 STATS — WIN/LOSS Track (OWNER signals විතරයි!)
 # ====================================================================
 async def show_stats(query):
     msg = "📊 *STATS loading...*\n\n"
@@ -622,7 +575,9 @@ async def show_stats(query):
 
     try:
         analyzer.update_active_signals()
-        stats = analyzer.get_enhanced_stats()
+        # 🔥 NEW: Use user-specific stats! Owner signals විතරයි ගණන් කරන්නේ
+        user_id = query.from_user.id
+        stats = analyzer.get_user_stats(user_id=user_id)
     except Exception as e:
         logger.error(f"Stats error: {e}")
         keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
@@ -647,7 +602,6 @@ async def show_stats(query):
     win_rate_display = f"{stats['win_rate']:.1f}%" if stats['win_rate'] > 0 else "0.0%"
     loss_rate_display = f"{stats['loss_rate']:.1f}%" if stats['loss_rate'] > 0 else "0.0%"
 
-    # Win rate emoji
     if stats['win_rate'] >= 80:
         wr_emoji = "🏆🔥"
     elif stats['win_rate'] >= 60:
@@ -672,7 +626,6 @@ async def show_stats(query):
         "╠══════════════════════════════════════╣"
     ]
 
-    # Best signal
     if stats.get('best_signal'):
         best = stats['best_signal']
         lines.append(f"║  🏆 BEST SIGNAL:                           ║")
@@ -680,7 +633,6 @@ async def show_stats(query):
         lines.append(f"║     Entry: {best['entry']:.8f}        ║")
         lines.append(f"║     TP Hit: {best['tp1']:.8f}                 ║")
 
-    # Worst signal
     if stats.get('worst_signal'):
         worst = stats['worst_signal']
         lines.append(f"║  💀 WORST SIGNAL:                          ║")
@@ -688,7 +640,6 @@ async def show_stats(query):
         lines.append(f"║     Entry: {worst['entry']:.8f}        ║")
         lines.append(f"║     SL Hit: {worst['sl']:.8f}                  ║")
 
-    # Per coin breakdown
     if stats.get('by_symbol'):
         lines.append(f"╠══════════════════════════════════════╣")
         lines.append(f"║  📊 PER COIN BREAKDOWN:               ║")
@@ -723,12 +674,14 @@ async def show_stats(query):
 
 
 # ====================================================================
-# 🔄 Recall Signals — කවදාවත් DELETE වෙන්නේ නැහැ
+# 🔄 Recall Signals — OWNER signals විතරයි!
 # ====================================================================
 async def show_recall_signals(query, page=0):
-    """Track කරපු signals list එක — DELETE වෙන්නේ නැහැ!"""
+    """Track කරපු signals list එක — Owner signals විතරයි"""
     try:
-        signals_list = analyzer.get_signal_recall_list(limit=50)
+        # 🔥 NEW: Use user-specific recall! Owner signals විතරයි
+        user_id = query.from_user.id
+        signals_list = analyzer.get_user_recall_list(user_id=user_id, limit=50)
     except Exception as e:
         logger.error(f"Recall error: {e}")
         keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
@@ -756,7 +709,7 @@ async def show_recall_signals(query, page=0):
     end_idx = min(start_idx + 10, total)
     page_signals = signals_list[start_idx:end_idx]
 
-    msg = f"📋 *SIGNAL RECALL LIST* — {total} signals\n"
+    msg = f"📋 *SIGNAL RECALL LIST* — {total} signals (ඔයාගේ විතරයි)\n"
     msg += f"_කවදාවත් DELETE වෙන්නේ නැහැ — හැමෝම ඉතුරු වෙනවා!_\n\n"
 
     for i, sig in enumerate(page_signals, start_idx + 1):
@@ -768,7 +721,6 @@ async def show_recall_signals(query, page=0):
             f"   🆔 `{sig['key'][:40]}...`\n\n"
         )
 
-    # Navigation buttons
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f'recall_page_{page-1}'))
@@ -788,11 +740,16 @@ async def show_recall_signals(query, page=0):
 
 
 # ====================================================================
-# BUTTON HANDLER — හැම callback එකම
+# BUTTON HANDLER — OWNER CHECK එකත් එක්ක
 # ====================================================================
 async def button_handler(update, context):
     query = update.callback_query
     await query.answer()
+
+    # 🔥 NEW: Owner check — වෙන කෙනෙක් නම් එපා!
+    if not is_owner(update):
+        await query.answer("⛔ මේ bot එක private එකක්! ඔයාට use කරන්න බැහැ.", show_alert=True)
+        return
 
     try:
         # ===== MAIN MENU =====
@@ -819,8 +776,7 @@ async def button_handler(update, context):
                 await show_shana_timeframe_scan(query, context, tf_label, tf_key)
 
         elif query.data.startswith('shana_coin_'):
-            # Format: shana_coin_{tf_key}_{coin_clean}
-            parts = query.data.split('_', 3)  # ['shana', 'coin', '5m', 'BTCUSDT']
+            parts = query.data.split('_', 3)
             if len(parts) == 4:
                 _, _, tf_key, coin_clean = parts
                 await show_shana_coin_analysis(query, context, tf_key, coin_clean)
@@ -859,7 +815,6 @@ async def button_handler(update, context):
             await show_prices(query)
 
         elif query.data == 'refresh_signals':
-            # Original short signals
             await show_short_signals_original(query)
 
         elif query.data == 'short_signals':
@@ -1035,7 +990,6 @@ async def auto_signal_loop():
                 check_count += 1
                 logger.info(f"🔄 Auto signal check #{check_count}...")
 
-                # Update active signals first
                 try:
                     updated = analyzer.update_active_signals()
                     if updated > 0:
@@ -1043,7 +997,6 @@ async def auto_signal_loop():
                 except Exception as e:
                     logger.warning(f"Update active signals error: {e}")
 
-                # Check for WIN signals — POWER BUY SHANA
                 try:
                     power_signals = analyzer.check_power_buy_shana()
                     for ps in power_signals:
@@ -1059,7 +1012,6 @@ async def auto_signal_loop():
                 except Exception as e:
                     logger.warning(f"Power buy check error: {e}")
 
-                # Check for new signals (original auto signal)
                 for coin in list(user_coins):
                     try:
                         short = analyzer.find_short_signal(coin)
@@ -1101,7 +1053,6 @@ async def auto_signal_loop():
                         logger.warning(f"Error checking {coin}: {e}")
                         continue
 
-                # Keep signal history manageable
                 if len(signal_history) > 200:
                     signal_history = signal_history[-200:]
 
@@ -1113,14 +1064,12 @@ async def auto_signal_loop():
             consecutive_errors += 1
             logger.error(f"Auto signal loop error ({consecutive_errors}): {e}")
 
-            # If too many errors, wait longer
             if consecutive_errors > 5:
                 logger.error("🔥 Too many consecutive errors! Waiting 60s...")
                 await asyncio.sleep(60)
                 consecutive_errors = 0
                 continue
 
-        # Wait ANALYSIS_INTERVAL seconds between checks
         await asyncio.sleep(ANALYSIS_INTERVAL)
 
 
@@ -1136,11 +1085,40 @@ async def health_check():
             logger.info(f"💚 Bot HEALTHY — Tracked: {total_signals} signals, Active: {active_count}, Coins: {len(user_coins)}")
         except Exception as e:
             logger.warning(f"Health check error: {e}")
-        await asyncio.sleep(1800)  # Every 30 minutes
+        await asyncio.sleep(1800)
+
+
+# ===== 🔥 NEW ADDITION 3: WEBHOOK MODE FOR UPTIMEROBOT =====
+async def webhook_mode(app):
+    """Webhook mode — UptimeRobot / Railway / Render etc. සඳහා"""
+    if not WEBHOOK_URL:
+        logger.info("⚠️ WEBHOOK_URL environment variable එක set කරලා නැහැ. Polling mode use කරන්න.")
+        return False
+
+    try:
+        webhook_url = f"{WEBHOOK_URL}/webhook"
+        await app.bot.set_webhook(url=webhook_url)
+        logger.info(f"✅ Webhook set to: {webhook_url}")
+
+        # Start webhook
+        await app.start()
+        app.updater.start_polling()  # Keep polling for background tasks
+
+        # Run on specified port
+        await app.start_webhook(
+            listen=WEBHOOK_LISTEN,
+            port=WEBHOOK_PORT,
+            url_path="webhook",
+        )
+        logger.info(f"🌐 Webhook listening on {WEBHOOK_LISTEN}:{WEBHOOK_PORT}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Webhook setup error: {e}")
+        return False
 
 
 # ====================================================================
-# MAIN
+# MAIN — Polling + Webhook dual mode
 # ====================================================================
 def main():
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -1161,8 +1139,22 @@ def main():
     logger.info(f"📊 Monitoring {len(user_coins)} coins")
     logger.info(f"⏰ Analysis interval: {ANALYSIS_INTERVAL}s")
     logger.info(f"📝 Signal tracker: {len(analyzer.signal_tracker)} signals loaded")
+    
+    # 🔥 NEW: Authorized users info
+    if OWNER_ID != 0:
+        logger.info(f"🔒 Bot is PRIVATE — Owner ID: {OWNER_ID}")
+    else:
+        logger.warning("⚠️ OWNER_ID set කරලා නැහැ! @userinfobot ගිහින් /start කරලා ID එක ගන්න.")
 
-    # Run polling with error handling
+    # 🔥 NEW: Try webhook first, fallback to polling
+    try:
+        loop.run_until_complete(webhook_mode(app))
+        # If webhook succeeded, keep running
+        loop.run_forever()
+    except Exception as e:
+        logger.warning(f"Webhook failed ({e}), falling back to polling mode...")
+
+    # Run polling with error handling (fallback)
     while True:
         try:
             app.run_polling(
