@@ -1,12 +1,9 @@
-import asyncio
 import logging
-import os
-import traceback
-from datetime import datetime
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from config import *
-from analyzer import BinanceAnalyzer
+import json
+import time
+from datetime import datetime, timedelta
+from config import COINS
+import requests
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -14,812 +11,759 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ============ GLOBAL ============
-analyzer = BinanceAnalyzer()
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-user_coins = set(COINS)
-signal_history = []
-auto_signal_running = True
 
-# ============ WELCOME IMAGE ============
-WELCOME_IMAGE = "welcome.jpg"
-
-# ============ TIMEFRAME LIST ============
-TIMEFRAMES = [
-    ("5 Minute", "5m"),
-    ("20 MINUTE", "20m"),
-    ("50 MINUTE", "50m"),
-    ("1 HOURS", "1h"),
-    ("2 HOURS", "2h"),
-]
-
-
-# ============ Progress Bar ============
-def generate_progress_bar(percentage, length=10):
-    filled = int(min(percentage, 100) / 100 * length)
-    return '█' * filled + '░' * (length - filled)
-
-
-def generate_colored_bar(percentage, length=10):
-    """Color-coded progress bar"""
-    filled = int(min(percentage, 100) / 100 * length)
-    bar = ''
-    for i in range(length):
-        if i < filled:
-            if percentage >= 80:
-                bar += '🟢'
-            elif percentage >= 50:
-                bar += '🟡'
-            elif percentage >= 30:
-                bar += '🟠'
-            else:
-                bar += '🔴'
-        else:
-            bar += '⚪'
-    return bar
-
-
-# ============ WELCOME ============
-async def start(update, context):
-    try:
-        if os.path.exists(WELCOME_IMAGE):
-            with open(WELCOME_IMAGE, 'rb') as photo:
-                await update.message.reply_photo(photo=photo)
-        elif WELCOME_IMAGE.startswith('http://') or WELCOME_IMAGE.startswith('https://'):
-            await update.message.reply_photo(photo=WELCOME_IMAGE)
-    except Exception as e:
-        logger.warning(f"Welcome image not available: {e}")
-
-    welcome_text = (
-        "🌟 *Welcome to SHANA Signal Bot* 🌟\n\n"
-        "🤖 *Powered by Binance*\n"
-        "📊 *Real-time Cryptocurrency Analysis*\n\n"
-        "🔹 Live Price Tracking — හැම coin එකම 🟢\n"
-        "🔹 Smart Trading Signals — Timeframe 5m/20m/50m/1h/2h ⏰\n"
-        "🔹 Signal Tracking — WIN/LOSS 100% Track 🏆\n"
-        "🔹 Live WIN% — Progress bar එක්ක 🎯\n\n"
-        "👇 *Click Menu to get started*"
-    )
-
-    keyboard = [[InlineKeyboardButton("📋 MENU", callback_data='menu')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(
-        welcome_text,
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
-
-
-# ============ MAIN MENU ============
-async def show_menu(query):
-    keyboard = [
-        [InlineKeyboardButton("🕹️ LIVE PRICE — හැම Coin එකම", callback_data='prices')],
-        [InlineKeyboardButton("🟢 NOW GOOD COIN", callback_data='best_coin')],
-        [InlineKeyboardButton("💀 BINANCE SHANA SIGNALS", callback_data='shana_signals_menu')],
-        [InlineKeyboardButton("📊 STATS — WIN/LOSS Track", callback_data='stats')],
-        [InlineKeyboardButton("🔄 Recall Signals", callback_data='recall_signals')],
-        [InlineKeyboardButton("⬅️ BACK", callback_data='back_to_welcome')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await query.edit_message_text(
-        "📋 *MAIN MENU*\n\n"
-        "👇 *Choose an option below:*",
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
-
-
-async def back_to_welcome(query):
-    welcome_text = (
-        "🌟 *Welcome to SHANA Signal Bot* 🌟\n\n"
-        "🤖 *Powered by Binance*\n"
-        "📊 *Real-time Cryptocurrency Analysis*\n\n"
-        "🔹 Live Price Tracking — හැම coin එකම 🟢\n"
-        "🔹 Smart Trading Signals — Timeframe 5m/20m/50m/1h/2h ⏰\n"
-        "🔹 Signal Tracking — WIN/LOSS 100% Track 🏆\n"
-        "🔹 Live WIN% — Progress bar එක්ක 🎯\n\n"
-        "👇 *Click Menu to get started*"
-    )
-
-    keyboard = [[InlineKeyboardButton("📋 MENU", callback_data='menu')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await query.edit_message_text(
-        welcome_text,
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
-
-
-# ====================================================================
-# 💀 BINANCE SHANA SIGNALS — TIMEFRAME SUB-MENU
-# ====================================================================
-async def show_shana_signals_menu(query):
-    """💀 BINANCE SHANA SIGNALS — බටන් ටික පෙන්වන්න"""
-    keyboard = [
-        [InlineKeyboardButton("⏰ 5 Minute", callback_data='shana_scan_5m')],
-        [InlineKeyboardButton("⏰ 20 MINUTE", callback_data='shana_scan_20m')],
-        [InlineKeyboardButton("⏰ 50 MINUTE", callback_data='shana_scan_50m')],
-        [InlineKeyboardButton("⏰ 1 HOURS", callback_data='shana_scan_1h')],
-        [InlineKeyboardButton("⏰ 2 HOURS", callback_data='shana_scan_2h')],
-        [InlineKeyboardButton("⬅️ BACK", callback_data='menu')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    msg = (
-        "💀 *BINANCE SHANA SIGNALS* 💀\n\n"
-        "👇 *Timeframe එකක් තෝරන්න:*\n\n"
-        "⏰ *5 Minute* — ඉක්මන් signals\n"
-        "⏰ *20 MINUTE* — Medium signals\n"
-        "⏰ *50 MINUTE* — Swing signals\n"
-        "⏰ *1 HOURS* — Hourly signals\n"
-        "⏰ *2 HOURS* — Long signals\n\n"
-        "📊 *හැම signal එකක්ම TRACK වෙනවා — DELETE වෙන්නේ නැහැ!*\n"
-        "🏆 *WIN/LOSS 100% Track කරනවා*"
-    )
-
-    await query.edit_message_text(
-        msg,
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
-
-
-async def show_shana_timeframe_scan(query, context, tf_label, tf_key):
-    """Timeframe එකක් scan කරලා coins list එක පෙන්වන්න"""
-    msg = f"🔍 *{tf_label} — SHORT signals සොයමින්...*\n\n"
-    msg += "⏳ *සියලුම coins scan වෙමින්...*\n"
-    msg += "_මේකට තත්පර 10-15ක් ගතවෙනවා._"
-    await query.edit_message_text(msg, parse_mode='Markdown')
-
-    try:
-        top_coins = analyzer.get_top_short_coins_timeframe(limit=20, timeframe=tf_key)
-    except Exception as e:
-        logger.error(f"Scan error {tf_key}: {e}")
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='shana_signals_menu')]]
-        await query.edit_message_text(
-            f"❌ *Scan error:* `{str(e)[:50]}`\n\n_නැවත try කරන්න._",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    if not top_coins:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='shana_signals_menu')]]
-        await query.edit_message_text(
-            f"✅ *{tf_label} — දැනට SHORT potential ඇති coins නැහැ*\n\n"
-            "Market bullish/neutral trend එකේ. වෙන timeframe එකක් try කරන්න.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    context.chat_data['shana_coins'] = top_coins
-    context.chat_data['shana_timeframe'] = tf_key
-    context.chat_data['shana_tf_label'] = tf_label
-
-    msg = f"💀 *BINANCE SHANA SIGNALS — {tf_label}* 💀\n\n"
-    msg += f"📊 *SHORT coins {len(top_coins)}ක් හමුවුනා*\n"
-    msg += "👇 *Coin එකක් click කරන්න — Signal Generate + Live WIN%:*\n\n"
-
-    keyboard = []
-    for coin_data in top_coins[:15]:
-        score = coin_data['score']
-        score_bar = generate_colored_bar(min(score, 100), 6)
-        reasons = ', '.join(coin_data['reasons'][:2]) if coin_data.get('reasons') else ''
-        change = coin_data.get('change_24h', 0)
-        change_emoji = "🟢" if change >= 0 else "🔴"
-
-        coin_clean = coin_data['symbol'].replace('/', '')
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{'📉' if score >= 50 else '📊'} {coin_data['symbol']}  {score_bar}  {score}%  |  {change_emoji}{change:+.1f}%  |  {reasons}",
-                callback_data=f'shana_coin_{tf_key}_{coin_clean}'
-            )
-        ])
-
-    keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data=f'shana_scan_{tf_key}')])
-    keyboard.append([InlineKeyboardButton("⬅️ BACK", callback_data='shana_signals_menu')])
-
-    await query.edit_message_text(
-        msg,
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-async def show_shana_coin_analysis(query, context, tf_key, coin_clean):
-    """Coin එකක් click කරහම — Signal generate + Live WIN% + Entry/TP1/TP2/SL"""
-    # Find full symbol
-    full_symbol = coin_clean
-    if '/' not in full_symbol:
-        for c in COINS:
-            if c.replace('/', '') == coin_clean:
-                full_symbol = c
-                break
-        else:
-            for c in user_coins:
-                if c.replace('/', '') == coin_clean:
-                    full_symbol = c
-                    break
-
-    # Get timeframe label
-    tf_label = "5m"
-    for label, key in TIMEFRAMES:
-        if key == tf_key:
-            tf_label = label
-            break
-
-    msg = f"🔍 *[{tf_label}] Analyzing {full_symbol}...*\n\n"
-    msg += "⏳ *Signal generate වෙමින්...*"
-    await query.edit_message_text(msg, parse_mode='Markdown')
-
-    # ===== GENERATE SIGNAL =====
-    signal = analyzer.generate_short_signal_from_scan_timeframe(full_symbol, tf_key)
-
-    # ===== GET LIVE TRACKING =====
-    live_data = analyzer.get_live_signal_percentage(full_symbol, 'SHORT')
-
-    # ===== QUICK ANALYSIS =====
-    quick = analyzer.analyze_coin_for_short_timeframe(full_symbol, tf_key)
-
-    # ===== MARK AS USER SIGNAL (for STATS and Recall) =====
-    if signal:
-        analyzer.mark_user_signal(
-            signal['symbol'],
-            signal['signal'],
-            signal['entry'],
-            signal['timestamp']
-        )
-
-    # ===== BUILD DISPLAY =====
-    msg = f"💀 *BINANCE SHANA SIGNALS — {tf_label}* 💀\n"
-    msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"🪙 *{full_symbol}*\n\n"
-
-    if signal:
-        # Confidence stars
-        conf = signal['confidence']
-        if conf >= 85:
-            stars = "⭐⭐⭐⭐⭐"
-        elif conf >= 75:
-            stars = "⭐⭐⭐⭐"
-        elif conf >= 65:
-            stars = "⭐⭐⭐"
-        elif conf >= 50:
-            stars = "⭐⭐"
-        else:
-            stars = "⭐"
-
-        msg += (
-            f"━━━ *SIGNAL DETAILS* ━━━\n"
-            f"📥 *Entry:* `{signal['entry']:.8f}`\n"
-            f"🎯 *TP1:* `{signal['take_profit_1']:.8f}`\n"
-            f"🎯 *TP2:* `{signal['take_profit_2']:.8f}`\n"
-            f"🛑 *SL:* `{signal['stop_loss']:.8f}`\n"
-            f"⚡ *Confidence:* `{conf}%` {stars}\n"
-            f"📊 *Filters:* `{signal.get('strict_filters', 0)}/5`\n\n"
-        )
-
-        if signal.get('reasons'):
-            msg += f"📌 *Reasons:*\n"
-            for i, r in enumerate(signal['reasons'][:5]):
-                msg += f"  {i+1}. {r}\n"
-            msg += "\n"
-    else:
-        msg += "_❌ Signal generate කරන්න තරම් conditions නැහැ._\n\n"
-
-    if quick:
-        msg += (
-            f"━━━ *QUICK ANALYSIS* ━━━\n"
-            f"📊 *Score:* `{quick['score']}/100`\n"
-            f"📉 *RSI:* `{quick['rsi']:.1f}`\n"
-            f"📊 *24h Change:* `{quick.get('change_24h', 0):+.2f}%`\n\n"
-        )
-
-    # ===== LIVE WIN/LOSS TRACKING — 100% =====
-    if live_data:
-        if live_data['status'] == 'WIN':
-            status_emoji = "🏆"
-            status_text = "WIN ✅ (TP Hit!)"
-        elif live_data['status'] == 'LOST':
-            status_emoji = "💀"
-            status_text = "LOST ❌ (SL Hit!)"
-        elif live_data['status'] == 'ACTIVE':
-            status_emoji = "⏳"
-            status_text = "ACTIVE 🟡"
-        else:
-            status_emoji = "⏸️"
-            status_text = live_data['status']
-
-        bar = generate_colored_bar(live_data['win_percentage'], 10)
-
-        msg += (
-            f"━━━━ *LIVE TRACKING* ━━━━\n"
-            f"{status_emoji} *Status:* {status_text}\n"
-            f"📊 *WIN Progress:* `{live_data['win_percentage']:.1f}%`\n"
-            f"`{bar}`\n"
-            f"📥 *Entry:* `{live_data['entry']:.8f}`\n"
-            f"🎯 *TP1:* `{live_data['tp1']:.8f}`\n"
-            f"🛑 *SL:* `{live_data['sl']:.8f}`\n"
-        )
-    else:
-        msg += "━━━━ *LIVE TRACKING* ━━━━\n"
-        msg += "📊 *No active signal to track*\n"
-        if signal:
-            msg += "_✅ Signal sent — tracking started! Refresh කරන්න._\n"
-        else:
-            msg += "_❌ Signal generate කරන්න බැරි උනා._\n"
-
-    # Live price
-    ticker = analyzer.get_ticker(full_symbol)
-    if ticker:
-        change = ticker['percentage']
-        emoji = "🟢" if float(change) > 0 else "🔴"
-        msg += f"\n📊 *24h Change:* {emoji} `{change:+.2f}%`"
-        msg += f"\n💵 *Price:* `${ticker['last']:.8f}`"
-
-    msg += f"\n\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    msg += "\n_⚠️ 100% නිවැරදි නැහැ. Risk management use කරන්න._"
-
-    keyboard = [
-        [InlineKeyboardButton("🔄 Refresh", callback_data=f'shana_coin_{tf_key}_{coin_clean}')],
-        [InlineKeyboardButton("📊 Signal Journey", callback_data=f'shana_journey_{tf_key}_{coin_clean}')],
-        [InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_scan_{tf_key}')]
-    ]
-
-    await query.edit_message_text(
-        msg,
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-async def show_shana_signal_journey(query, context, tf_key, coin_clean):
-    """Signal journey එක පෙන්වන්න — හැම level එකම"""
-    full_symbol = coin_clean
-    if '/' not in full_symbol:
-        for c in COINS:
-            if c.replace('/', '') == coin_clean:
-                full_symbol = c
-                break
-        else:
-            for c in user_coins:
-                if c.replace('/', '') == coin_clean:
-                    full_symbol = c
-                    break
-
-    # Find the signal key for this coin
-    signal_key = None
-    for key in list(analyzer.signal_tracker.keys()):
-        if full_symbol in key and 'SHORT' in key:
-            signal_key = key
-            break
-
-    if not signal_key:
-        # Try to find any signal for this symbol
-        for key in list(analyzer.signal_tracker.keys()):
-            sig = analyzer.signal_tracker[key]
-            if sig.get('symbol') == full_symbol:
-                signal_key = key
-                break
-
-    if not signal_key:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_coin_{tf_key}_{coin_clean}')]]
-        await query.edit_message_text(
-            f"❌ *{full_symbol} සඳහා signal track කරලා නැහැ*\n\n"
-            "මුලින් Signal Generate කරන්න.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    journey = analyzer.get_signal_journey(signal_key)
-
-    if not journey:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_coin_{tf_key}_{coin_clean}')]]
-        await query.edit_message_text(
-            "❌ *Signal journey එක load කරන්න බැරි උනා*",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    display = analyzer.format_signal_journey_display(journey)
-    if not display:
-        display = f"❌ Format error"
-
-    keyboard = [
-        [InlineKeyboardButton("🔄 Refresh", callback_data=f'shana_journey_{tf_key}_{coin_clean}')],
-        [InlineKeyboardButton("⬅️ BACK", callback_data=f'shana_coin_{tf_key}_{coin_clean}')]
-    ]
-
-    await query.edit_message_text(
-        f"`{display}`",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-# ====================================================================
-# 🟢 NOW GOOD COIN
-# ====================================================================
-async def show_best_coin(query):
-    msg = "🔍 *හොඳම SHORT coins සොයමින්...*\n\n"
-    await query.edit_message_text(msg, parse_mode='Markdown')
-
-    try:
-        top_coins = analyzer.get_top_short_coins(limit=5)
-    except Exception as e:
-        logger.error(f"Best coin error: {e}")
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(
-            f"❌ *Error:* `{str(e)[:50]}`",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    if not top_coins:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(
-            "😴 *දැනට trade එකට හොඳ SHORT coin එකක් නැහැ*\n\n"
-            "Market range එකේ. විනාඩි 2කින් try කරන්න.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    msg = "🏆 *NOW GOOD SHORT COINS* 🏆\n\n"
-    for i, coin_data in enumerate(top_coins):
-        score_bar = generate_colored_bar(min(coin_data['score'], 100), 8)
-        reasons = ', '.join(coin_data['reasons'][:3]) if coin_data.get('reasons') else 'Analysis in progress'
-        change = coin_data.get('change_24h', 0)
-        change_emoji = "🟢" if change >= 0 else "🔴"
-        msg += (
-            f"{i+1}. *{coin_data['symbol']}*\n"
-            f"   Score: `{score_bar}` `{coin_data['score']}%`\n"
-            f"   📉 RSI: `{coin_data['rsi']:.1f}` | 24h: {change_emoji} `{change:+.2f}%`\n"
-            f"   📌 {reasons}\n\n"
-        )
-    msg += "_⚠️ 100% නිවැරදි නැහැ!_"
-
-    keyboard = [
-        [InlineKeyboardButton("🔄 Refresh", callback_data='best_coin')],
-        [InlineKeyboardButton("⬅️ BACK", callback_data='menu')]
-    ]
-    await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-# ====================================================================
-# 🕹️ LIVE PRICE — හැම Coin එකම
-# ====================================================================
-async def show_prices(query):
-    msg = "🟢 *LIVE PRICE — හැම Coin එකම* 🟢\n\n"
-    msg += "⏳ *Prices loading...*"
-    await query.edit_message_text(msg, parse_mode='Markdown')
-
-    try:
-        prices = analyzer.get_all_live_prices()
-    except Exception as e:
-        logger.error(f"Prices error: {e}")
-        keyboard = [[InlineKeyboardButton("🔄 Try Again", callback_data='prices')],
-                    [InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(
-            f"❌ *Error loading prices:* `{str(e)[:50]}`",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    if not prices:
-        keyboard = [[InlineKeyboardButton("🔄 Try Again", callback_data='prices'),
-                     InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text("❌ *Price data නැහැ*", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    lines = [
-        "╔════════════════════════════════════════════════════╗",
-        "║        🟢 LIVE PRICE — ALL 50 COINS 🟢            ║",
-        "╠════════════════════════════════════════════════════╣",
-        "║  #  │  Coin       │  Price       │  24h%    │ Vol ║",
-        "╠════════════════════════════════════════════════════╣"
-    ]
-    for i, p in enumerate(prices, 1):
-        sym = p['symbol'].replace('/USDT', '')
-        chg = p['change_24h']
-        vol = p.get('volume_24h', 0)
-        arrow = "🟢" if chg > 0 else ("🔴" if chg < 0 else "⚪")
-        vol_str = f"${vol/1e9:.1f}B" if vol > 1_000_000_000 else f"${vol/1e6:.1f}M" if vol > 1_000_000 else f"${vol/1e3:.1f}K" if vol > 1_000 else f"${vol:.0f}"
-        price = p['price']
-        price_str = f"${price:.2f}" if price >= 100 else f"${price:.4f}" if price >= 1 else f"${price:.6f}" if price >= 0.01 else f"${price:.8f}"
-        lines.append(f"║  {i:2d}  │  {sym:<8s}  │  {price_str:<12s}  │  {arrow} {chg:>+6.2f}%  │  {vol_str:<8s}  ║")
-    lines.append("╚════════════════════════════════════════════════════╝")
-    lines.append(f"🔄 Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data='prices')],
-                [InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-    await query.edit_message_text("```\n" + "\n".join(lines) + "\n```", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-# ====================================================================
-# 📊 STATS — USER Signals විතරක්
-# ====================================================================
-async def show_stats(query):
-    msg = "📊 *STATS loading...*\n\n"
-    await query.edit_message_text(msg, parse_mode='Markdown')
-
-    try:
-        analyzer.update_active_signals()
-        stats = analyzer.get_user_stats()  # USER signals විතරක්!
-    except Exception as e:
-        logger.error(f"Stats error: {e}")
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(f"❌ *Stats error:* `{str(e)[:50]}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    if stats['total_signals'] == 0:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(
-            "📊 *තාම USER signal track කරලා නැහැ*\n\n"
-            "💀 BINANCE SHANA SIGNALS button එකෙන් signal generate කරන්න.",
-            parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    wr_emoji = "🏆🔥" if stats['win_rate'] >= 80 else "✅👍" if stats['win_rate'] >= 60 else "📊🤷" if stats['win_rate'] >= 40 else "💀👎"
-    lines = [
-        "╔══════════════════════════════════════╗",
-        "║    📊 BINANCE SHANA STATS 📊         ║",
-        "╠══════════════════════════════════════╣",
-        f"║  📈 Total Signals  : {stats['total_signals']:<4d}              ║",
-        f"║  🏆 Wins           : {stats['total_wins']:<4d}  🟢🟢🟢         ║",
-        f"║  💀 Losses         : {stats['total_losses']:<4d}  🔴🔴🔴         ║",
-        f"║  ⏳ Active         : {stats['active_signals']:<4d}  🟡🟡🟡         ║",
-        f"║  ⌛ Expired        : {stats['expired_signals']:<4d}                  ║",
-        "╠══════════════════════════════════════╣",
-        f"║  📊 Win Rate       : {stats['win_rate']:<5.1f}%  {wr_emoji:<7s}      ║",
-        f"║  📊 Loss Rate      : {stats['loss_rate']:<5.1f}%                  ║",
-        "╠══════════════════════════════════════╣"
-    ]
-    if stats.get('best_signal'):
-        best = stats['best_signal']
-        lines.append(f"║  🏆 BEST SIGNAL:                           ║")
-        lines.append(f"║     {best['symbol']} — {best['signal']} — Conf: {best['confidence']}%   ║")
-        lines.append(f"║     Entry: {best['entry']:.8f}        ║")
-    if stats.get('worst_signal'):
-        worst = stats['worst_signal']
-        lines.append(f"║  💀 WORST SIGNAL:                          ║")
-        lines.append(f"║     {worst['symbol']} — {worst['signal']} — Conf: {worst['confidence']}%   ║")
-        lines.append(f"║     Entry: {worst['entry']:.8f}        ║")
-    if stats.get('by_symbol'):
-        lines.append("╠══════════════════════════════════════╣")
-        lines.append("║  📊 PER COIN BREAKDOWN:               ║")
-        for sym, data in sorted(stats['by_symbol'].items(), key=lambda x: x[1]['wins']/(x[1]['wins']+x[1]['losses']+0.01) if (x[1]['wins']+x[1]['losses']) > 0 else 0, reverse=True)[:10]:
-            completed = data['wins'] + data['losses']
-            wr = round((data['wins'] / completed) * 100, 1) if completed > 0 else 0
-            sym_short = sym.replace('/USDT', '')
-            wr_ico = "🏆" if wr >= 80 else "✅" if wr >= 60 else "📊" if wr >= 40 else "💀"
-            lines.append(f"║  {wr_ico} {sym_short:<8s}  W:{data['wins']:<2d}  L:{data['losses']:<2d}  A:{data['active']:<2d}  WR:{wr:>5.1f}%  ║")
-    lines.append("╚══════════════════════════════════════╝")
-    lines.append(f"🔄 Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    keyboard = [[InlineKeyboardButton("🔄 Refresh Stats", callback_data='stats')],
-                [InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-    await query.edit_message_text("```\n" + "\n".join(lines) + "\n```", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-# ====================================================================
-# 🔄 Recall — USER Signals විතරක්! (Entry + WIN/LOST/ACTIVE)
-# ====================================================================
-async def show_recall_signals(query, page=0):
-    """Track කරපු USER signals list එක — DELETE වෙන්නේ නැහැ!"""
-    try:
-        signals_list = analyzer.get_user_recall_list(limit=50)  # USER signals විතරක්
-    except Exception as e:
-        logger.error(f"Recall error: {e}")
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(f"❌ *Recall error:* `{str(e)[:50]}`", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    if not signals_list:
-        keyboard = [[InlineKeyboardButton("⬅️ BACK", callback_data='menu')]]
-        await query.edit_message_text(
-            "📋 *තාම USER signal track කරලා නැහැ*\n\n"
-            "💀 BINANCE SHANA SIGNALS button එකෙන් signal generate කරන්න.",
-            parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    total = len(signals_list)
-    total_pages = (total + 9) // 10
-    page = max(0, min(page, total_pages - 1))
-    start_idx = page * 10
-    end_idx = min(start_idx + 10, total)
-    page_signals = signals_list[start_idx:end_idx]
-
-    msg = f"📋 *USER SIGNAL RECALL LIST* — {total} signals\n"
-    msg += "_කවදාවත් DELETE වෙන්නේ නැහැ — හැමෝම ඉතුරු වෙනවා!_\n\n"
-
-    for i, sig in enumerate(page_signals, start_idx + 1):
-        status_emoji = "🏆" if sig['status'] == 'WIN' else "💀" if sig['status'] == 'LOST' else "⏳" if sig['status'] == 'ACTIVE' else "⏸️"
-        msg += (
-            f"{i}. {status_emoji} *{sig['symbol']}* — {sig['signal']}\n"
-            f"   📥 Entry: `{sig['entry']:.8f}`\n"
-            f"   📊 Status: `{sig['status']}` | WIN%: `{sig['win_percentage']:.1f}%` | Conf: `{sig['confidence']}%`\n\n"
-        )
-
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f'recall_page_{page-1}'))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f'recall_page_{page+1}'))
-    keyboard = []
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    keyboard.append([InlineKeyboardButton("⬅️ BACK", callback_data='menu')])
-
-    await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-# ====================================================================
-# BUTTON HANDLER
-# ====================================================================
-async def button_handler(update, context):
-    query = update.callback_query
-    await query.answer()
-    try:
-        if query.data == 'menu':
-            await show_menu(query)
-        elif query.data == 'back_to_welcome':
-            await back_to_welcome(query)
-        elif query.data == 'shana_signals_menu':
-            await show_shana_signals_menu(query)
-        elif query.data.startswith('shana_scan_'):
-            tf_map = {'shana_scan_5m': ('5 Minute', '5m'), 'shana_scan_20m': ('20 MINUTE', '20m'),
-                      'shana_scan_50m': ('50 MINUTE', '50m'), 'shana_scan_1h': ('1 HOURS', '1h'),
-                      'shana_scan_2h': ('2 HOURS', '2h')}
-            if query.data in tf_map:
-                await show_shana_timeframe_scan(query, context, *tf_map[query.data])
-        elif query.data.startswith('shana_coin_'):
-            parts = query.data.split('_', 3)
-            if len(parts) == 4:
-                await show_shana_coin_analysis(query, context, parts[2], parts[3])
-        elif query.data.startswith('shana_journey_'):
-            parts = query.data.split('_', 3)
-            if len(parts) == 4:
-                await show_shana_signal_journey(query, context, parts[2], parts[3])
-        elif query.data == 'best_coin':
-            await show_best_coin(query)
-        elif query.data == 'prices':
-            await show_prices(query)
-        elif query.data == 'stats':
-            await show_stats(query)
-        elif query.data == 'recall_signals':
-            await show_recall_signals(query, 0)
-        elif query.data.startswith('recall_page_'):
+class BinanceAnalyzer:
+    def __init__(self, data_file='signal_tracker.json'):
+        self.data_file = data_file
+        self.signal_tracker = {}
+        self.base_url = "https://api.binance.com"
+        self.load_signals()
+
+    # ============ DATA PERSISTENCE ============
+    def load_signals(self):
+        try:
+            with open(self.data_file, 'r') as f:
+                self.signal_tracker = json.load(f)
+            logger.info(f"📂 Loaded {len(self.signal_tracker)} signals from {self.data_file}")
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.signal_tracker = {}
+            logger.info(f"📂 No signal file found, starting fresh")
+
+    def _save_signals(self):
+        try:
+            with open(self.data_file, 'w') as f:
+                json.dump(self.signal_tracker, f, indent=2)
+            logger.info(f"💾 Saved {len(self.signal_tracker)} signals to {self.data_file}")
+        except Exception as e:
+            logger.error(f"❌ Save error: {e}")
+
+    # ============ API HELPERS ============
+    def _make_request(self, endpoint, params=None):
+        try:
+            url = f"{self.base_url}{endpoint}"
+            resp = requests.get(url, params=params, timeout=10)
+            if resp.status_code == 200:
+                return resp.json()
+            logger.warning(f"API error {resp.status_code}: {endpoint}")
+            return None
+        except Exception as e:
+            logger.error(f"Request error {endpoint}: {e}")
+            return None
+
+    def get_ticker(self, symbol):
+        data = self._make_request("/api/v3/ticker/24hr", {"symbol": symbol})
+        if data:
+            return {
+                'symbol': symbol,
+                'last': float(data.get('lastPrice', 0)),
+                'percentage': float(data.get('priceChangePercent', 0)),
+                'volume': float(data.get('volume', 0)),
+                'quoteVolume': float(data.get('quoteVolume', 0)),
+                'high': float(data.get('highPrice', 0)),
+                'low': float(data.get('lowPrice', 0))
+            }
+        return None
+
+    def get_klines(self, symbol, interval='5m', limit=50):
+        data = self._make_request("/api/v3/klines", {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit
+        })
+        if data:
+            klines = []
+            for k in data:
+                klines.append({
+                    'open': float(k[1]),
+                    'high': float(k[2]),
+                    'low': float(k[3]),
+                    'close': float(k[4]),
+                    'volume': float(k[5]),
+                    'time': k[0]
+                })
+            return klines
+        return None
+
+    # ============ TECHNICAL INDICATORS ============
+    def calculate_rsi(self, closes, period=14):
+        if len(closes) < period + 1:
+            return 50.0
+        deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+        gains = [d if d > 0 else 0 for d in deltas]
+        losses = [-d if d < 0 else 0 for d in deltas]
+        avg_gain = sum(gains[-period:]) / period
+        avg_loss = sum(losses[-period:]) / period
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
+
+    def calculate_ema(self, closes, period):
+        if len(closes) < period:
+            return closes[-1] if closes else 0
+        multiplier = 2 / (period + 1)
+        ema = sum(closes[:period]) / period
+        for price in closes[period:]:
+            ema = (price - ema) * multiplier + ema
+        return ema
+
+    def calculate_macd(self, closes, fast=12, slow=26, signal=9):
+        if len(closes) < slow:
+            return {'macd': 0, 'signal': 0, 'histogram': 0}
+        ema_fast = self.calculate_ema(closes, fast)
+        ema_slow = self.calculate_ema(closes, slow)
+        macd_line = ema_fast - ema_slow
+        macd_signal = macd_line
+        histogram = macd_line - macd_signal
+        return {'macd': macd_line, 'signal': macd_signal, 'histogram': histogram}
+
+    def calculate_bollinger(self, closes, period=20, std_dev=2):
+        if len(closes) < period:
+            return {'upper': closes[-1], 'middle': closes[-1], 'lower': closes[-1]}
+        sma = sum(closes[-period:]) / period
+        variance = sum((c - sma) ** 2 for c in closes[-period:]) / period
+        std = variance ** 0.5
+        return {
+            'upper': sma + std_dev * std,
+            'middle': sma,
+            'lower': sma - std_dev * std
+        }
+
+    def calculate_volume_avg(self, klines, period=20):
+        if len(klines) < period:
+            return sum(k['volume'] for k in klines) / len(klines) if klines else 0
+        return sum(k['volume'] for k in klines[-period:]) / period
+
+    # ============ CORE ANALYSIS ============
+    def analyze_coin_for_short(self, symbol):
+        """Original short analysis - unchanged"""
+        try:
+            klines = self.get_klines(symbol, '5m', 50)
+            ticker = self.get_ticker(symbol)
+            if not klines or not ticker:
+                return None
+
+            closes = [k['close'] for k in klines]
+            current_price = ticker['last']
+            rsi = self.calculate_rsi(closes)
+            ema_20 = self.calculate_ema(closes, 20)
+            ema_50 = self.calculate_ema(closes, 50) if len(closes) >= 50 else ema_20
+            bb = self.calculate_bollinger(closes)
+            macd = self.calculate_macd(closes)
+            avg_vol = self.calculate_volume_avg(klines)
+            current_vol = klines[-1]['volume']
+            change_24h = ticker['percentage']
+
+            score = 0
+            reasons = []
+            strict_filters = 0
+
+            # RSI analysis
+            if rsi > 70:
+                score += 25
+                reasons.append(f"RSI overbought ({rsi:.1f})")
+                strict_filters += 1
+            elif rsi > 60:
+                score += 15
+                reasons.append(f"RSI elevated ({rsi:.1f})")
+
+            # Price vs EMA
+            if current_price < ema_20:
+                score += 20
+                reasons.append(f"Price below EMA20")
+                if current_price < ema_50:
+                    score += 10
+                    reasons.append(f"Price below EMA50")
+                    strict_filters += 1
+
+            # Bollinger
+            if current_price > bb['upper']:
+                score += 20
+                reasons.append("Above upper Bollinger")
+                strict_filters += 1
+            elif current_price > bb['middle']:
+                score += 10
+                reasons.append("Above mid Bollinger")
+
+            # MACD
+            if macd['histogram'] < -0.5:
+                score += 15
+                reasons.append("MACD bearish cross")
+                strict_filters += 1
+            elif macd['histogram'] < 0:
+                score += 8
+                reasons.append("MACD weakening")
+
+            # Volume
+            if current_vol > avg_vol * 1.5:
+                score += 10
+                reasons.append("High volume")
+            if current_vol > avg_vol * 2:
+                strict_filters += 1
+
+            # Change 24h
+            if change_24h > 2:
+                score += 5
+                reasons.append(f"Up {change_24h:.1f}% 24h")
+
+            return {
+                'symbol': symbol,
+                'score': min(score, 100),
+                'rsi': rsi,
+                'current_price': current_price,
+                'ema_20': ema_20,
+                'ema_50': ema_50,
+                'bollinger_upper': bb['upper'],
+                'bollinger_lower': bb['lower'],
+                'macd': macd,
+                'volume_ratio': current_vol / avg_vol if avg_vol > 0 else 1,
+                'change_24h': change_24h,
+                'reasons': reasons,
+                'strict_filters': strict_filters,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Analysis error {symbol}: {e}")
+            return None
+
+    def get_top_short_coins(self, limit=5):
+        """Original - unchanged"""
+        results = []
+        for coin in COINS:
             try:
-                await show_recall_signals(query, int(query.data.split('_')[2]))
+                analysis = self.analyze_coin_for_short(coin)
+                if analysis and analysis['score'] >= 50:
+                    results.append(analysis)
+                time.sleep(0.05)
             except:
-                await show_recall_signals(query, 0)
-        elif query.data in ['refresh_prices', 'refresh_signals', 'short_signals', 'long_signals', 'select_coins', 'toggle_auto']:
-            keyboard = [[InlineKeyboardButton("📋 MENU", callback_data='menu')]]
-            await query.edit_message_text("⚠️ *This feature is available in MENU*", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        else:
-            logger.warning(f"Unknown callback: {query.data}")
-            keyboard = [[InlineKeyboardButton("📋 MENU", callback_data='menu')]]
-            await query.edit_message_text("⚠️ *Unknown option* — MENU එකෙන් තෝරන්න.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-    except Exception as e:
-        logger.error(f"Button error: {e}\n{traceback.format_exc()}")
-        try:
-            keyboard = [[InlineKeyboardButton("📋 MENU", callback_data='menu')]]
-            await query.edit_message_text(f"❌ *Error:* `{str(e)[:80]}`\n\nMENU එකෙන් නැවත try කරන්න.", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        except:
-            pass
+                continue
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:limit]
 
-
-# ====================================================================
-# AUTO SIGNAL LOOP — 24/7
-# ====================================================================
-async def auto_signal_loop():
-    global signal_history
-    consecutive_errors = 0
-    check_count = 0
-    while True:
+    # ============ TIMEFRAME ANALYSIS ============
+    def analyze_coin_for_short_timeframe(self, symbol, timeframe='5m'):
         try:
-            if auto_signal_running:
-                check_count += 1
-                logger.info(f"🔄 Auto signal check #{check_count}...")
+            klines = self.get_klines(symbol, timeframe, 50)
+            ticker = self.get_ticker(symbol)
+            if not klines or not ticker:
+                return None
+
+            closes = [k['close'] for k in klines]
+            current_price = ticker['last']
+            rsi = self.calculate_rsi(closes)
+            ema_20 = self.calculate_ema(closes, 20)
+            ema_50 = self.calculate_ema(closes, 50) if len(closes) >= 50 else ema_20
+            bb = self.calculate_bollinger(closes)
+            macd = self.calculate_macd(closes)
+            avg_vol = self.calculate_volume_avg(klines)
+            current_vol = klines[-1]['volume']
+            change_24h = ticker.get('percentage', 0)
+
+            score = 0
+            reasons = []
+            strict_filters = 0
+
+            if rsi > 70:
+                score += 25; reasons.append(f"RSI overbought ({rsi:.1f})"); strict_filters += 1
+            elif rsi > 60:
+                score += 15; reasons.append(f"RSI elevated ({rsi:.1f})")
+            if current_price < ema_20:
+                score += 20; reasons.append(f"Price below EMA20")
+                if current_price < ema_50:
+                    score += 10; reasons.append(f"Price below EMA50"); strict_filters += 1
+            if current_price > bb['upper']:
+                score += 20; reasons.append("Above upper Bollinger"); strict_filters += 1
+            elif current_price > bb['middle']:
+                score += 10; reasons.append("Above mid Bollinger")
+            if macd['histogram'] < -0.5:
+                score += 15; reasons.append("MACD bearish cross"); strict_filters += 1
+            elif macd['histogram'] < 0:
+                score += 8; reasons.append("MACD weakening")
+            if current_vol > avg_vol * 1.5:
+                score += 10; reasons.append("High volume")
+            if current_vol > avg_vol * 2:
+                strict_filters += 1
+            if change_24h > 2:
+                score += 5; reasons.append(f"Up {change_24h:.1f}% 24h")
+
+            return {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'score': min(score, 100),
+                'rsi': rsi,
+                'current_price': current_price,
+                'change_24h': change_24h,
+                'reasons': reasons,
+                'strict_filters': strict_filters,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"TF analysis error {symbol} {timeframe}: {e}")
+            return None
+
+    def get_top_short_coins_timeframe(self, limit=20, timeframe='5m'):
+        results = []
+        for coin in COINS:
+            try:
+                analysis = self.analyze_coin_for_short_timeframe(coin, timeframe)
+                if analysis and analysis['score'] >= 40:
+                    results.append(analysis)
+                time.sleep(0.05)
+            except:
+                continue
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:limit]
+
+    # ============ SIGNAL GENERATION ============
+    def find_short_signal(self, symbol):
+        try:
+            analysis = self.analyze_coin_for_short(symbol)
+            if not analysis or analysis['score'] < 50:
+                return None
+
+            entry = analysis['current_price']
+            # TP1 = entry - (5 x ATR approximation)
+            tp1 = entry * 0.97
+            tp2 = entry * 0.93
+            sl = entry * 1.03
+
+            signal_key = f"{symbol}_SHORT_{int(time.time())}"
+            signal = {
+                'key': signal_key,
+                'symbol': symbol,
+                'signal': 'SHORT',
+                'timeframe': '5m',
+                'entry': entry,
+                'take_profit_1': tp1,
+                'take_profit_2': tp2,
+                'stop_loss': sl,
+                'confidence': analysis['score'],
+                'rsi': analysis['rsi'],
+                'change_24h': analysis.get('change_24h', 0),
+                'reasons': analysis['reasons'],
+                'strict_filters': analysis['strict_filters'],
+                'status': 'ACTIVE',
+                'win_percentage': 50,
+                'timestamp': datetime.now().isoformat(),
+                'is_user_signal': False
+            }
+
+            self.signal_tracker[signal_key] = signal
+            self._save_signals()
+            logger.info(f"🚨 SHORT signal generated: {symbol} ({analysis['score']}%)")
+            return signal
+        except Exception as e:
+            logger.error(f"Short signal error {symbol}: {e}")
+            return None
+
+    def find_long_signal(self, symbol):
+        try:
+            klines = self.get_klines(symbol, '5m', 50)
+            ticker = self.get_ticker(symbol)
+            if not klines or not ticker:
+                return None
+            closes = [k['close'] for k in klines]
+            rsi = self.calculate_rsi(closes)
+            entry = ticker['last']
+            tp1 = entry * 1.03
+            sl = entry * 0.97
+            if rsi < 30:
+                signal = {
+                    'key': f"{symbol}_LONG_{int(time.time())}",
+                    'symbol': symbol, 'signal': 'LONG', 'timeframe': '5m',
+                    'entry': entry, 'take_profit_1': tp1, 'stop_loss': sl,
+                    'confidence': 70 if rsi < 25 else 50,
+                    'rsi': rsi, 'reasons': [f"RSI oversold ({rsi:.1f})"],
+                    'status': 'ACTIVE', 'win_percentage': 50,
+                    'timestamp': datetime.now().isoformat(),
+                    'is_user_signal': False
+                }
+                self.signal_tracker[signal['key']] = signal
+                self._save_signals()
+                return signal
+            return None
+        except Exception as e:
+            return None
+
+    def generate_short_signal_from_scan_timeframe(self, symbol, timeframe='5m'):
+        try:
+            analysis = self.analyze_coin_for_short_timeframe(symbol, timeframe)
+            if not analysis or analysis['score'] < 40:
+                return None
+
+            entry = analysis['current_price']
+            tp1 = entry * 0.97
+            tp2 = entry * 0.93
+            sl = entry * 1.03
+
+            signal_key = f"{symbol}_SHORT_{int(time.time())}"
+            signal = {
+                'key': signal_key,
+                'symbol': symbol,
+                'signal': 'SHORT',
+                'timeframe': timeframe,
+                'entry': entry,
+                'take_profit_1': tp1,
+                'take_profit_2': tp2,
+                'stop_loss': sl,
+                'confidence': analysis['score'],
+                'rsi': analysis['rsi'],
+                'change_24h': analysis.get('change_24h', 0),
+                'reasons': analysis.get('reasons', []),
+                'strict_filters': analysis.get('strict_filters', 0),
+                'status': 'ACTIVE',
+                'win_percentage': 50,
+                'timestamp': datetime.now().isoformat(),
+                'is_user_signal': False
+            }
+
+            self.signal_tracker[signal_key] = signal
+            self._save_signals()
+            logger.info(f"🚨 SHORT signal ({timeframe}): {symbol} ({analysis['score']}%)")
+            return signal
+        except Exception as e:
+            logger.error(f"TF signal gen error {symbol}: {e}")
+            return None
+
+    # ============ LIVE TRACKING ============
+    def get_live_signal_percentage(self, symbol, signal_type='SHORT'):
+        try:
+            ticker = self.get_ticker(symbol)
+            if not ticker:
+                return None
+            current = ticker['last']
+
+            # Find most recent signal for this symbol
+            signal = None
+            for key, sig in self.signal_tracker.items():
+                if sig.get('symbol') == symbol and sig.get('signal') == signal_type:
+                    if signal is None or sig.get('timestamp', '') > signal.get('timestamp', ''):
+                        signal = sig
+
+            if not signal:
+                return None
+
+            entry = signal['entry']
+            tp1 = signal.get('take_profit_1', signal.get('tp1', entry * 0.97))
+            sl = signal.get('stop_loss', signal.get('sl', entry * 1.03))
+            status = signal.get('status', 'ACTIVE')
+
+            # Calculate win percentage
+            if signal_type == 'SHORT':
+                # TP below entry, SL above entry
+                total_range = abs(entry - tp1) + abs(entry - sl)
+                if total_range == 0:
+                    win_pct = 50
+                elif status == 'WIN':
+                    win_pct = 100
+                elif status == 'LOST':
+                    win_pct = 0
+                else:
+                    if current <= tp1:
+                        win_pct = 100
+                        status = 'WIN'
+                    elif current >= sl:
+                        win_pct = 0
+                        status = 'LOST'
+                    elif current < entry:
+                        progress = (entry - current) / (entry - tp1)
+                        win_pct = min(99, progress * 100)
+                    else:
+                        progress = (current - entry) / (sl - entry)
+                        win_pct = max(1, (1 - progress) * 100)
+            else:
+                total_range = abs(tp1 - entry) + abs(sl - entry)
+                if total_range == 0:
+                    win_pct = 50
+                elif status == 'WIN':
+                    win_pct = 100
+                elif status == 'LOST':
+                    win_pct = 0
+                else:
+                    if current >= tp1:
+                        win_pct = 100; status = 'WIN'
+                    elif current <= sl:
+                        win_pct = 0; status = 'LOST'
+                    elif current > entry:
+                        progress = (current - entry) / (tp1 - entry)
+                        win_pct = min(99, progress * 100)
+                    else:
+                        progress = (entry - current) / (entry - sl)
+                        win_pct = max(1, (1 - progress) * 100)
+
+            # Update tracker
+            for key in list(self.signal_tracker.keys()):
+                if self.signal_tracker[key].get('key') == signal.get('key'):
+                    self.signal_tracker[key]['status'] = status
+                    self.signal_tracker[key]['win_percentage'] = win_pct
+                    self._save_signals()
+                    break
+
+            return {
+                'symbol': symbol,
+                'signal': signal_type,
+                'entry': entry,
+                'current_price': current,
+                'tp1': tp1,
+                'sl': sl,
+                'status': status,
+                'win_percentage': win_pct
+            }
+        except Exception as e:
+            logger.error(f"Live tracking error {symbol}: {e}")
+            return None
+
+    def update_active_signals(self):
+        updated = 0
+        for key, sig in self.signal_tracker.items():
+            if sig.get('status') == 'ACTIVE':
                 try:
-                    updated = analyzer.update_active_signals()
-                    if updated > 0:
-                        logger.info(f"📊 Updated {updated} active signals")
-                except Exception as e:
-                    logger.warning(f"Update active signals error: {e}")
-                try:
-                    for ps in analyzer.check_power_buy_shana():
-                        try:
-                            await bot.send_message(TELEGRAM_CHAT_ID, ps['message'], parse_mode='Markdown')
-                            logger.info(f"💀🔥 POWER BUY SHANA: {ps['symbol']}")
-                        except:
-                            pass
+                    live = self.get_live_signal_percentage(sig['symbol'], sig['signal'])
+                    if live:
+                        sig['status'] = live['status']
+                        sig['win_percentage'] = live['win_percentage']
+                        updated += 1
                 except:
                     pass
-                for coin in list(user_coins):
-                    try:
-                        short = analyzer.find_short_signal(coin)
-                        if short and short['confidence'] >= 50:
-                            signal_history.append(short)
-                            msg = f"🚨 *SHORT SIGNAL* 🚨\n\n📉 *{short['symbol']}*\n💰 Entry: `${short['entry']:.4f}`\n🎯 TP1: `${short['take_profit_1']:.4f}`\n🛑 SL: `${short['stop_loss']:.4f}`\n⚡ Confidence: {short['confidence']}%\n📌 {', '.join(short['reasons'][:3])}\n\n⏰ {short['timestamp']}"
-                            try:
-                                await bot.send_message(TELEGRAM_CHAT_ID, msg, parse_mode='Markdown')
-                            except:
-                                pass
-                        long = analyzer.find_long_signal(coin)
-                        if long and long['confidence'] >= 40:
-                            signal_history.append(long)
-                            msg = f"🟢 *LONG SIGNAL* 🟢\n\n📈 *{long['symbol']}*\n💰 Entry: `${long['entry']:.4f}`\n🎯 TP1: `${long['take_profit_1']:.4f}`\n🛑 SL: `${long['stop_loss']:.4f}`\n⚡ Confidence: {long['confidence']}%\n📌 {', '.join(long['reasons'][:3])}\n\n⏰ {long['timestamp']}"
-                            try:
-                                await bot.send_message(TELEGRAM_CHAT_ID, msg, parse_mode='Markdown')
-                            except:
-                                pass
-                    except:
-                        continue
-                if len(signal_history) > 200:
-                    signal_history = signal_history[-200:]
-                consecutive_errors = 0
-            else:
-                logger.info("⏸️ Auto signal paused")
-        except Exception as e:
-            consecutive_errors += 1
-            logger.error(f"Auto signal loop error ({consecutive_errors}): {e}")
-            if consecutive_errors > 5:
-                await asyncio.sleep(60)
-                consecutive_errors = 0
-                continue
-        await asyncio.sleep(ANALYSIS_INTERVAL)
+        if updated > 0:
+            self._save_signals()
+        return updated
 
-
-# ====================================================================
-# HEALTH CHECK
-# ====================================================================
-async def health_check():
-    while True:
+    # ============ LIVE PRICES ============
+    def get_all_live_prices(self):
         try:
-            total = len(analyzer.signal_tracker)
-            user_total = len(getattr(analyzer, '_user_signal_keys', set()))
-            active = sum(1 for s in analyzer.signal_tracker.values() if s.get('status') == 'ACTIVE')
-            logger.info(f"💚 Bot HEALTHY — Tracked: {total}, User: {user_total}, Active: {active}, Coins: {len(user_coins)}")
-        except:
-            pass
-        await asyncio.sleep(1800)
-
-
-# ====================================================================
-# MAIN
-# ====================================================================
-def main():
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.create_task(auto_signal_loop())
-    loop.create_task(health_check())
-    logger.info("🤖💀 BINANCE SHANA SIGNALS BOT STARTED!")
-    logger.info(f"📊 Monitoring {len(user_coins)} coins | Interval: {ANALYSIS_INTERVAL}s")
-    while True:
-        try:
-            app.run_polling(allowed_updates=['message', 'callback_query'], drop_pending_updates=True, timeout=30)
+            prices = []
+            for coin in COINS:
+                ticker = self.get_ticker(coin)
+                if ticker:
+                    prices.append({
+                        'symbol': coin,
+                        'price': ticker['last'],
+                        'change_24h': ticker['percentage'],
+                        'volume_24h': ticker['quoteVolume']
+                    })
+                time.sleep(0.05)
+            return prices
         except Exception as e:
-            logger.error(f"🔥 Polling crashed: {e}")
-            import time
-            logger.info("🔄 Restarting in 5 seconds...")
-            time.sleep(5)
-            continue
+            logger.error(f"Live prices error: {e}")
+            return []
 
+    # ============ POWER BUY SHANA ============
+    def check_power_buy_shana(self):
+        power_signals = []
+        try:
+            for key, sig in self.signal_tracker.items():
+                if sig.get('status') == 'WIN' and sig.get('win_percentage', 0) >= 80:
+                    if not sig.get('power_buy_sent', False):
+                        power_signals.append({
+                            'symbol': sig['symbol'],
+                            'message': f"💀🔥 *POWER BUY SHANA* 🔥💀\n\n🏆 *{sig['symbol']}* TP HIT!\n📊 WIN%: {sig['win_percentage']:.1f}%\n💰 Entry: ${sig['entry']:.8f}\n🎯 {sig['signal']} Signal WIN ✅"
+                        })
+                        self.signal_tracker[key]['power_buy_sent'] = True
+                        self._save_signals()
+        except Exception as e:
+            logger.error(f"Power buy error: {e}")
+        return power_signals
 
-if __name__ == "__main__":
-    main()
+    # ============ STATS & RECALL (ORIGINAL) ============
+    def get_enhanced_stats(self):
+        stats = {
+            'total_signals': len(self.signal_tracker),
+            'total_wins': 0, 'total_losses': 0,
+            'active_signals': 0, 'expired_signals': 0,
+            'win_rate': 0, 'loss_rate': 0,
+            'best_signal': None, 'worst_signal': None,
+            'by_symbol': {}
+        }
+        for key, sig in self.signal_tracker.items():
+            status = sig.get('status', 'ACTIVE')
+            if status == 'WIN': stats['total_wins'] += 1
+            elif status == 'LOST': stats['total_losses'] += 1
+            elif status == 'ACTIVE': stats['active_signals'] += 1
+            elif status == 'EXPIRED': stats['expired_signals'] += 1
+
+            sym = sig.get('symbol', 'UNKNOWN')
+            if sym not in stats['by_symbol']:
+                stats['by_symbol'][sym] = {'wins': 0, 'losses': 0, 'active': 0, 'expired': 0}
+            if status == 'WIN': stats['by_symbol'][sym]['wins'] += 1
+            elif status == 'LOST': stats['by_symbol'][sym]['losses'] += 1
+            elif status == 'ACTIVE': stats['by_symbol'][sym]['active'] += 1
+            elif status == 'EXPIRED': stats['by_symbol'][sym]['expired'] += 1
+
+        completed = stats['total_wins'] + stats['total_losses']
+        if completed > 0:
+            stats['win_rate'] = (stats['total_wins'] / completed) * 100
+            stats['loss_rate'] = (stats['total_losses'] / completed) * 100
+        return stats
+
+    def get_signal_recall_list(self, limit=50):
+        signals = []
+        for key, sig in self.signal_tracker.items():
+            signals.append({
+                'key': key,
+                'symbol': sig.get('symbol', ''),
+                'signal': sig.get('signal', ''),
+                'entry': sig.get('entry', 0),
+                'confidence': sig.get('confidence', 0),
+                'status': sig.get('status', 'ACTIVE'),
+                'win_percentage': sig.get('win_percentage', 50),
+                'timestamp': sig.get('timestamp', '')
+            })
+        signals.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        return signals[:limit]
+
+    def get_signal_journey(self, signal_key):
+        if signal_key in self.signal_tracker:
+            sig = self.signal_tracker[signal_key]
+            return {
+                'signal_key': signal_key,
+                'symbol': sig.get('symbol', ''),
+                'signal': sig.get('signal', ''),
+                'entry': sig.get('entry', 0),
+                'tp1': sig.get('take_profit_1', sig.get('tp1', 0)),
+                'sl': sig.get('stop_loss', sig.get('sl', 0)),
+                'confidence': sig.get('confidence', 0),
+                'status': sig.get('status', 'ACTIVE'),
+                'win_percentage': sig.get('win_percentage', 50),
+                'timestamp': sig.get('timestamp', ''),
+                'reasons': sig.get('reasons', []),
+                'history': [
+                    {'time': sig.get('timestamp', ''), 'price': sig.get('entry', 0), 'action': 'ENTRY'}
+                ]
+            }
+        return None
+
+    def format_signal_journey_display(self, journey):
+        if not journey:
+            return "No journey data"
+        lines = [
+            f"📋 SIGNAL JOURNEY: {journey.get('symbol', '')}",
+            f"{'═'*40}",
+            f"Signal: {journey.get('signal', '')}",
+            f"Entry: ${journey.get('entry', 0):.8f}",
+            f"TP1: ${journey.get('tp1', 0):.8f}",
+            f"SL: ${journey.get('sl', 0):.8f}",
+            f"Confidence: {journey.get('confidence', 0)}%",
+            f"Status: {journey.get('status', '')}",
+            f"WIN%: {journey.get('win_percentage', 50):.1f}%",
+            f"Time: {journey.get('timestamp', '')[:19]}",
+        ]
+        if journey.get('history'):
+            lines.append(f"{'═'*40}")
+            for h in journey['history']:
+                lines.append(f"  {h.get('time','')[:16]} - ${h.get('price',0):.8f} ({h.get('action','')})")
+        return '\n'.join(lines)
+
+    # ============ 🔥 NEW: USER-SPECIFIC SIGNAL TRACKING (for STATS & Recall) ============
+    def mark_user_signal(self, symbol, signal_type, entry, timestamp):
+        """Mark a signal as belonging to USER (for STATS/Recall filtering only)"""
+        try:
+            # Try exact match first
+            for key, sig in list(self.signal_tracker.items()):
+                if (sig.get('symbol') == symbol and 
+                    sig.get('signal') == signal_type and
+                    abs(float(sig.get('entry', 0)) - float(entry)) < 0.0001 and
+                    str(sig.get('timestamp', ''))[:10] == str(timestamp)[:10]):
+                    
+                    sig['is_user_signal'] = True
+                    sig['user_timestamp'] = str(datetime.now())
+                    self._save_signals()
+                    logger.info(f"✅ Marked user signal: {symbol} {signal_type}")
+                    return True
+            
+            # Fallback: match by symbol + signal type only
+            for key, sig in list(self.signal_tracker.items()):
+                if sig.get('symbol') == symbol and sig.get('signal') == signal_type:
+                    sig['is_user_signal'] = True
+                    sig['user_timestamp'] = str(datetime.now())
+                    self._save_signals()
+                    logger.info(f"✅ Marked user signal (generic): {symbol} {signal_type}")
+                    return True
+            
+            logger.warning(f"⚠️ Could not find signal to mark: {symbol} {signal_type}")
+            return False
+        except Exception as e:
+            logger.error(f"mark_user_signal error: {e}")
+            return False
+
+    def get_user_stats(self):
+        """Get stats for USER signals only (not system/scan signals)"""
+        stats = {
+            'total_signals': 0, 'total_wins': 0, 'total_losses': 0,
+            'active_signals': 0, 'expired_signals': 0,
+            'win_rate': 0.0, 'loss_rate': 0.0,
+            'best_signal': None, 'worst_signal': None, 'by_symbol': {}
+        }
+        
+        user_signals = {k: v for k, v in self.signal_tracker.items() 
+                       if v.get('is_user_signal') == True}
+        
+        for key, sig in user_signals.items():
+            status = sig.get('status', 'ACTIVE')
+            stats['total_signals'] += 1
+            
+            if status == 'WIN':
+                stats['total_wins'] += 1
+            elif status == 'LOST':
+                stats['total_losses'] += 1
+            elif status == 'ACTIVE':
+                stats['active_signals'] += 1
+            elif status == 'EXPIRED':
+                stats['expired_signals'] += 1
+            
+            symbol = sig.get('symbol', 'UNKNOWN')
+            if symbol not in stats['by_symbol']:
+                stats['by_symbol'][symbol] = {'wins': 0, 'losses': 0, 'active': 0, 'expired': 0}
+            if status == 'WIN':
+                stats['by_symbol'][symbol]['wins'] += 1
+            elif status == 'LOST':
+                stats['by_symbol'][symbol]['losses'] += 1
+            elif status == 'ACTIVE':
+                stats['by_symbol'][symbol]['active'] += 1
+            elif status == 'EXPIRED':
+                stats['by_symbol'][symbol]['expired'] += 1
+            
+            if status == 'WIN':
+                if stats['best_signal'] is None or sig.get('confidence', 0) > stats['best_signal'].get('confidence', 0):
+                    stats['best_signal'] = {
+                        'symbol': sig.get('symbol', ''),
+                        'signal': sig.get('signal', ''),
+                        'entry': sig.get('entry', 0),
+                        'tp1': sig.get('take_profit_1', sig.get('tp1', 0)),
+                        'confidence': sig.get('confidence', 0)
+                    }
+            elif status == 'LOST':
+                if stats['worst_signal'] is None or sig.get('confidence', 0) > stats['worst_signal'].get('confidence', 0):
+                    stats['worst_signal'] = {
+                        'symbol': sig.get('symbol', ''),
+                        'signal': sig.get('signal', ''),
+                        'entry': sig.get('entry', 0),
+                        'sl': sig.get('stop_loss', sig.get('sl', 0)),
+                        'confidence': sig.get('confidence', 0)
+                    }
+        
+        completed = stats['total_wins'] + stats['total_losses']
+        if completed > 0:
+            stats['win_rate'] = (stats['total_wins'] / completed) * 100
+            stats['loss_rate'] = (stats['total_losses'] / completed) * 100
+        
+        return stats
+
+    def get_user_recall_list(self, limit=50):
+        """Get recall list for USER signals only (not system/scan signals)"""
+        user_signals = []
+        for key, sig in self.signal_tracker.items():
+            if sig.get('is_user_signal') == True:
+                user_signals.append({
+                    'key': key,
+                    'symbol': sig.get('symbol', 'UNKNOWN'),
+                    'signal': sig.get('signal', 'SHORT'),
+                    'entry': sig.get('entry', 0),
+                    'confidence': sig.get('confidence', 0),
+                    'status': sig.get('status', 'ACTIVE'),
+                    'win_percentage': sig.get('win_percentage', 50),
+                    'timestamp': sig.get('timestamp', ''),
+                })
+        
+        user_signals.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        return user_signals[:limit]
