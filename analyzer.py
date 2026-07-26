@@ -1491,10 +1491,8 @@ class BinanceAnalyzer:
             f"║  💰 MFI        : {mfi:<8.1f}                  ║\n"
             f"║  📦 BB%        : {bb_pct:<8.1f}%                 ║\n"
             f"╠══════════════════════════════════════════╣\n"
-            f"║  📋 Reasons:                              ║\n"
-            f"{reason_lines}\n"
             f"╠══════════════════════════════════════════╣\n"
-            f"║  ⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}          ║\n"
+            f"║  ⏰ {datetime.now().         ║\n"
             f"╚══════════════════════════════════════════╝"
         )
         
@@ -1511,7 +1509,7 @@ class BinanceAnalyzer:
             "╔══════════════════════════════════════════════════════════╗",
             "║              🟢 LIVE PRICE — ALL COINS 🟢               ║",
             "╠══════════════════════════════════════════════════════════╣",
-            "║  #  │  Coin        │  Price        │  24h%    │  Vol    ║",
+            "║  #  │  Coin        │  Price        │  Live price   │  Vol    ║",
             "╠══════════════════════════════════════════════════════════╣"
         ]
         
@@ -1699,7 +1697,6 @@ class BinanceAnalyzer:
         මේක call කරන්නේ USER button click එකකින් signal generate උනාට පස්සේ.
         
         STATS සහ Recall වලට පෙන්වන්නේ මේ USER signals විතරක්!
-        auto_signal_loop එකෙන් ආපු signals COUNT වෙන්නේ නැහැ!
         """
         self._ensure_user_signals()
         key = self._get_signal_key(symbol, signal_type, entry_price, timestamp)
@@ -1716,7 +1713,6 @@ class BinanceAnalyzer:
     def get_user_stats(self):
         """
         📊 STATS — USER ගත්ත signals විතරක්.
-        auto_signal_loop / system signals මෙතන COUNT වෙන්නේ නැහැ!
         """
         self._ensure_user_signals()
         
@@ -1790,8 +1786,7 @@ class BinanceAnalyzer:
 
     def get_user_recall_list(self, limit=50):
         """
-        🔄 Recall — USER ගත්ත signals විතරක්.
-        හැම USER signal එකක්ම DELETE වෙන්නේ නැහැ — ඉතුරු වෙනවා!
+        🔄 USER ගත්ත signals විතරක්.
         """
         self._ensure_user_signals()
         
