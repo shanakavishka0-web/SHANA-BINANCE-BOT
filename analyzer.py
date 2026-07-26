@@ -258,7 +258,6 @@ class BinanceAnalyzer:
         # Try CCXT first
         if self.exchange:
             try:
-                # === FIX: key = symbol (BTC/USDT), id = clean_symbol (BTCUSDT) ===
                 self.exchange.markets = {
                     symbol: {
                         "id": clean_symbol,
@@ -682,7 +681,7 @@ class BinanceAnalyzer:
             return signal_result
         return None
 
-    # ============ NEW: Quick scan for SHORT coin list ============
+    # ============ Quick scan for SHORT coin list ============
     def analyze_coin_for_short(self, symbol):
         """
         Coin එකක short potential එක ඉක්මනින් scan කරලා score එකක් දෙනවා.
@@ -778,3 +777,80 @@ class BinanceAnalyzer:
                 results.append(result)
         results.sort(key=lambda x: x['score'], reverse=True)
         return results[:limit]
+
+    # ============ NEW: Quick scan එකෙන් ALWAYS signal generate කරන්න ============
+    def generate_short_signal_from_scan(self, symbol):
+        """
+        Quick scan score එක අනුව signal generate කරන්න + track කරන්න.
+        Strict find_short_signal() fail වුනාම මේක use කරන්න.
+        Entry/TP1/TP2/SL හැමෝටම දෙනවා + Live WIN% tracking.
+        """
+        try:
+            # First try strict signal
+            strict_signal = self.find_short_signal(symbol)
+            if strict_signal:
+                return strict_signal
+            
+            # Strict signal නැති නම් quick scan එකෙන් generate කරන්න
+            df = self.get_klines(symbol, "5m", 100)
+            if df is None or len(df) < 50:
+                return None
+            
+            df = self.calculate_indicators(df)
+            latest = df.iloc[-1]
+            
+            scan = self.analyze_coin_for_short(symbol)
+            if not scan or scan['score'] < 25:
+                return None
+            
+            atr = latest['atr']
+            if atr == 0 or pd.isna(atr):
+                atr = latest['close'] * 0.002  # 0.2% fallback
+            
+            entry_price = scan['price']
+            score_factor = scan['score'] / 100.0  # 0.25 to 1.0
+            
+            # Score එක අනුව TP/SL multipliers adjust කරන්න
+            # Higher score = tighter TP, tighter SL (more confident short)
+            tp_multiplier = max(0.8, 2.0 - (score_factor * 1.5))  # 0.8 to 1.625
+            sl_multiplier = max(1.0, 2.5 - (score_factor * 1.5))  # 1.0 to 2.125
+            
+            # Confidence = score based + extra
+            confidence = min(92, max(40, int(scan['score'] + 20)))
+            
+            reasons_raw = scan.get('reasons', [])
+            reasons = []
+            for r in reasons_raw:
+                if r and len(reasons) < 8:
+                    reasons.append(r)
+            if not reasons:
+                reasons = ["📊 Quick Analysis"]
+            
+            signal_result = {
+                'symbol': symbol,
+                'signal': 'SHORT',
+                'entry': entry_price,
+                'take_profit_1': entry_price - (atr * tp_multiplier),
+                'take_profit_2': entry_price - (atr * tp_multiplier * 2),
+                'stop_loss': entry_price + (atr * sl_multiplier),
+                'confidence': confidence,
+                'accuracy_score': confidence,
+                'strength': len(reasons),
+                'reasons': reasons,
+                'rsi': scan['rsi'],
+                'volume_ratio': latest.get('volume_ratio_5', 1.0),
+                'adx': latest.get('adx', 20),
+                'mfi': latest.get('mfi', 50),
+                'bb_percent': latest.get('bb_percent', 50),
+                'strict_filters': min(5, int(scan['score'] / 14)),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Track කරන්න — signal_tracker.json save වෙනවා, Live WIN% වැඩ කරනවා
+            self.track_signal(signal_result)
+            logger.info(f"📊 Generated signal from scan: {symbol} score={scan['score']}% conf={confidence}%")
+            return signal_result
+            
+        except Exception as e:
+            logger.warning(f"generate_short_signal_from_scan error {symbol}: {e}")
+            return None
