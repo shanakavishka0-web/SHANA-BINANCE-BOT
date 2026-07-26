@@ -854,3 +854,806 @@ class BinanceAnalyzer:
         except Exception as e:
             logger.warning(f"generate_short_signal_from_scan error {symbol}: {e}")
             return None
+
+    # =========================================================================
+    # ==================== 💀 BINANCE SHANA SIGNALS — NEW ADDITIONS ============
+    # =========================================================================
+    # උඩ තියෙන කිසිම code එකක් වෙනස් කරලා නැහැ. පහත methods අලුතෙන් add කරලා.
+    # =========================================================================
+
+    # ==================== 1. TIMEFRAME-BASED SHORT ANALYSIS ====================
+
+    def analyze_coin_for_short_timeframe(self, symbol, timeframe="5m"):
+        """
+        ඕනෑම timeframe එකක් දාලා short potential scan කරන්න.
+        ⏰ 5m / 20m / 50m / 1h / 2h — හැමෝටම වැඩ කරනවා.
+        """
+        try:
+            # Timeframe එක අනුව limit adjust කරන්න (larger timeframe = more bars needed)
+            limit_map = {"5m": 100, "20m": 80, "50m": 60, "1h": 50, "2h": 50}
+            limit = limit_map.get(timeframe, 100)
+            
+            df = self.get_klines(symbol, timeframe, limit)
+            if df is None or len(df) < 40:
+                return None
+            
+            df = self.calculate_indicators(df)
+            latest = df.iloc[-1]
+            
+            score = 0
+            reasons = []
+            
+            # RSI check
+            if latest['rsi'] > 65:
+                score += 15
+                reasons.append(f"RSI {latest['rsi']:.0f}")
+            if latest['rsi'] > RSI_OVERBOUGHT:
+                score += 10
+            
+            # MACD check
+            if latest['macd'] < latest['macd_signal']:
+                score += 15
+                reasons.append("MACD Bearish")
+            
+            # EMA bearish alignment
+            ema_bearish_count = sum([
+                latest['close'] < latest['ema_5'],
+                latest['close'] < latest['ema_12'],
+                latest['close'] < latest['ema_26']
+            ])
+            if ema_bearish_count >= 2:
+                score += 15
+                reasons.append(f"EMA×{ema_bearish_count}")
+            
+            # Bollinger Bands
+            if latest['bb_percent'] > 70:
+                score += 10
+                reasons.append(f"BB% {latest['bb_percent']:.0f}")
+            
+            # Volume
+            if latest['volume_ratio_5'] > 1.2 and not latest['is_bullish']:
+                score += 10
+                reasons.append("Vol Sell")
+            elif latest['is_bearish']:
+                score += 5
+            
+            # Resistance
+            if latest['close'] >= latest['resistance'] * 0.99:
+                score += 10
+                reasons.append("Resistance")
+            
+            # Stochastic
+            if latest['stoch_k'] > 75:
+                score += 10
+                reasons.append("Stoch Over")
+            
+            # ADX trend strength
+            if latest['adx'] > 20 and latest['minus_di'] > latest['plus_di']:
+                score += 10
+                reasons.append("ADX Down")
+            
+            # MFI
+            if latest['mfi'] > 70:
+                score += 5
+                reasons.append("MFI High")
+            
+            ticker = self.get_ticker(symbol)
+            if not ticker:
+                return None
+            
+            return {
+                'symbol': symbol,
+                'price': ticker['last'],
+                'change_24h': ticker['percentage'],
+                'volume_24h': ticker['quoteVolume'],
+                'score': score,
+                'reasons': reasons[:3],
+                'rsi': latest['rsi'],
+                'timeframe': timeframe,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.warning(f"analyze_coin_for_short_timeframe error {symbol}@{timeframe}: {e}")
+            return None
+
+    def get_top_short_coins_timeframe(self, limit=20, timeframe="5m"):
+        """
+        ALL Binance coins scan කරලා TOP SHORT coins list එක දෙනවා.
+        ඕනෑම timeframe එකක් use කරන්න පුළුවන්.
+        💀 BINANCE SHANA SIGNALS — ⏰5m / 20m / 50m / 1h / 2h
+        """
+        all_coins = [
+            "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
+            "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
+            "MATIC/USDT", "UNI/USDT", "LTC/USDT", "ATOM/USDT", "ETC/USDT",
+            "FIL/USDT", "APT/USDT", "ARB/USDT", "OP/USDT", "SUI/USDT",
+            "PEPE/USDT", "FLOKI/USDT", "INJ/USDT", "NEAR/USDT", "SAND/USDT",
+            "MANA/USDT", "AXS/USDT", "ALGO/USDT", "VET/USDT", "ICP/USDT",
+            "FTM/USDT", "CRV/USDT", "AAVE/USDT", "MKR/USDT", "COMP/USDT",
+            "EGLD/USDT", "THETA/USDT", "KAVA/USDT", "ZIL/USDT", "IOTA/USDT",
+            "WAVES/USDT", "BAT/USDT", "ENJ/USDT", "CHZ/USDT", "GALA/USDT",
+            "DYDX/USDT", "RUNE/USDT", "LDO/USDT", "GMX/USDT", "BLUR/USDT"
+        ]
+        results = []
+        for coin in all_coins:
+            result = self.analyze_coin_for_short_timeframe(coin, timeframe)
+            if result and result['score'] >= 20:
+                results.append(result)
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:limit]
+
+    def generate_short_signal_from_scan_timeframe(self, symbol, timeframe="5m"):
+        """
+        ඕනෑම timeframe එකක short signal generate කරලා TRACK කරනවා.
+        Signal එක signal_tracker.json වල save වෙනවා — DELETE වෙන්නේ නැහැ!
+        """
+        try:
+            # First try strict signal with the given timeframe data
+            df = self.get_klines(symbol, timeframe, 200 if timeframe in ["5m","20m"] else 150)
+            if df is None or len(df) < 50:
+                return None
+            
+            df = self.calculate_indicators(df)
+            latest = df.iloc[-1]
+            
+            scan = self.analyze_coin_for_short_timeframe(symbol, timeframe)
+            if not scan or scan['score'] < 25:
+                return None
+            
+            atr = latest['atr']
+            if atr == 0 or pd.isna(atr):
+                atr = latest['close'] * 0.002
+            
+            entry_price = scan['price']
+            score_factor = scan['score'] / 100.0
+            
+            # Timeframe-based multiplier adjust
+            tf_mult_map = {"5m": 1.0, "20m": 1.1, "50m": 1.2, "1h": 1.3, "2h": 1.4}
+            tf_mult = tf_mult_map.get(timeframe, 1.0)
+            
+            tp_multiplier = max(0.8, (2.0 - (score_factor * 1.5)) * tf_mult)
+            sl_multiplier = max(1.0, (2.5 - (score_factor * 1.5)) * tf_mult)
+            
+            confidence = min(95, max(40, int(scan['score'] + 25)))
+            
+            reasons_raw = scan.get('reasons', [])
+            reasons = []
+            for r in reasons_raw:
+                if r and len(reasons) < 8:
+                    reasons.append(r)
+            if not reasons:
+                reasons = [f"📊 {timeframe} Analysis"]
+            
+            signal_result = {
+                'symbol': symbol,
+                'signal': 'SHORT',
+                'entry': entry_price,
+                'take_profit_1': entry_price - (atr * tp_multiplier),
+                'take_profit_2': entry_price - (atr * tp_multiplier * 2),
+                'stop_loss': entry_price + (atr * sl_multiplier),
+                'confidence': confidence,
+                'accuracy_score': confidence,
+                'strength': len(reasons),
+                'reasons': reasons,
+                'rsi': scan['rsi'],
+                'volume_ratio': latest.get('volume_ratio_5', 1.0),
+                'adx': latest.get('adx', 20),
+                'mfi': latest.get('mfi', 50),
+                'bb_percent': latest.get('bb_percent', 50),
+                'strict_filters': min(5, int(scan['score'] / 14)),
+                'timeframe': timeframe,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # TRACK කරන්න — මේක signal_tracker.json එකට save වෙනවා. කවදාවත් DELETE වෙන්නේ නැහැ.
+            self.track_signal(signal_result)
+            logger.info(f"💀 SHANA SIGNAL [{timeframe}]: {symbol} score={scan['score']} conf={confidence}%")
+            return signal_result
+            
+        except Exception as e:
+            logger.warning(f"generate_short_signal_from_scan_timeframe error {symbol}@{timeframe}: {e}")
+            return None
+
+    # ==================== 2. LIVE PRICE — ALL COINS ====================
+
+    def get_all_live_prices(self):
+        """
+        හැම coin එකකම LIVE price එක පෙන්වන්න.
+        🟢 LIVE PRICE — 50 coins
+        """
+        all_coins = [
+            "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
+            "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
+            "MATIC/USDT", "UNI/USDT", "LTC/USDT", "ATOM/USDT", "ETC/USDT",
+            "FIL/USDT", "APT/USDT", "ARB/USDT", "OP/USDT", "SUI/USDT",
+            "PEPE/USDT", "FLOKI/USDT", "INJ/USDT", "NEAR/USDT", "SAND/USDT",
+            "MANA/USDT", "AXS/USDT", "ALGO/USDT", "VET/USDT", "ICP/USDT",
+            "FTM/USDT", "CRV/USDT", "AAVE/USDT", "MKR/USDT", "COMP/USDT",
+            "EGLD/USDT", "THETA/USDT", "KAVA/USDT", "ZIL/USDT", "IOTA/USDT",
+            "WAVES/USDT", "BAT/USDT", "ENJ/USDT", "CHZ/USDT", "GALA/USDT",
+            "DYDX/USDT", "RUNE/USDT", "LDO/USDT", "GMX/USDT", "BLUR/USDT"
+        ]
+        
+        prices = []
+        for coin in all_coins:
+            ticker = self.get_ticker(coin)
+            if ticker:
+                prices.append({
+                    'symbol': coin,
+                    'price': ticker['last'],
+                    'change_24h': ticker['percentage'],
+                    'volume_24h': ticker['quoteVolume'],
+                    'high_24h': ticker['high'],
+                    'low_24h': ticker['low']
+                })
+        return prices
+
+    # ==================== 3. ENHANCED STATS WITH WIN/LOSS ====================
+
+    def get_enhanced_stats(self, symbol=None):
+        """
+        STATS button එකට වැඩිපුර විස්තර.
+        WIN / LOST signals — ලස්සනට පෙන්වන්න.
+        """
+        stats = {
+            'total_signals': 0,
+            'total_wins': 0,
+            'total_losses': 0,
+            'active_signals': 0,
+            'expired_signals': 0,
+            'win_rate': 0.0,
+            'loss_rate': 0.0,
+            'best_signal': None,
+            'worst_signal': None,
+            'win_details': [],
+            'loss_details': [],
+            'active_details': [],
+            'by_symbol': {}
+        }
+        
+        for key, sig in self.signal_tracker.items():
+            if symbol and sig['symbol'] != symbol:
+                continue
+            
+            sym = sig['symbol']
+            if sym not in stats['by_symbol']:
+                stats['by_symbol'][sym] = {'wins': 0, 'losses': 0, 'active': 0, 'total': 0}
+            
+            stats['total_signals'] += 1
+            stats['by_symbol'][sym]['total'] += 1
+            
+            detail = {
+                'key': key,
+                'symbol': sig['symbol'],
+                'signal': sig['signal'],
+                'entry': sig['entry'],
+                'tp1': sig['take_profit_1'],
+                'sl': sig['stop_loss'],
+                'confidence': sig.get('confidence', 0),
+                'win_percentage': sig.get('win_percentage', 0),
+                'current_price': sig.get('current_price', sig['entry']),
+                'highest_price': sig.get('highest_price', sig['entry']),
+                'lowest_price': sig.get('lowest_price', sig['entry']),
+                'timestamp': sig.get('timestamp', ''),
+                'status': sig['status']
+            }
+            
+            if sig['status'] == 'WIN':
+                stats['total_wins'] += 1
+                stats['by_symbol'][sym]['wins'] += 1
+                stats['win_details'].append(detail)
+                if stats['best_signal'] is None or sig.get('confidence', 0) > stats['best_signal'].get('confidence', 0):
+                    stats['best_signal'] = detail
+            elif sig['status'] == 'LOST':
+                stats['total_losses'] += 1
+                stats['by_symbol'][sym]['losses'] += 1
+                stats['loss_details'].append(detail)
+                if stats['worst_signal'] is None or sig.get('win_percentage', 100) < stats['worst_signal'].get('win_percentage', 100):
+                    stats['worst_signal'] = detail
+            elif sig['status'] == 'ACTIVE':
+                stats['active_signals'] += 1
+                stats['by_symbol'][sym]['active'] += 1
+                stats['active_details'].append(detail)
+            elif sig['status'] == 'EXPIRED':
+                stats['expired_signals'] += 1
+        
+        completed = stats['total_wins'] + stats['total_losses']
+        if completed > 0:
+            stats['win_rate'] = round((stats['total_wins'] / completed) * 100, 1)
+            stats['loss_rate'] = round((stats['total_losses'] / completed) * 100, 1)
+        
+        return stats
+
+    # ==================== 4. SIGNAL RECALL — කවදාවත් DELETE වෙන්නේ නැහැ ====================
+
+    def recall_signal(self, signal_key):
+        """
+        පරණ signal එකක් recall කරන්න.
+        signal_key එක දුන්නම — entry, TP1, TP2, SL, හැම දෙයක්ම පෙන්වනවා.
+        Signal එක WIN ද LOST ද ACTIVE ද කියලත් පෙන්වනවා.
+        """
+        if signal_key in self.signal_tracker:
+            sig = self.signal_tracker[signal_key]
+            
+            # Update current price
+            ticker = self.get_ticker(sig['symbol'])
+            current_price = ticker['last'] if ticker else sig['current_price']
+            
+            # Build recall response
+            recall = {
+                'key': signal_key,
+                'symbol': sig['symbol'],
+                'signal_type': sig['signal'],
+                'entry_price': sig['entry'],
+                'take_profit_1': sig['take_profit_1'],
+                'take_profit_2': sig['take_profit_2'],
+                'stop_loss': sig['stop_loss'],
+                'confidence': sig.get('confidence', 0),
+                'status': sig['status'],
+                'current_price': current_price,
+                'win_percentage': sig.get('win_percentage', 0),
+                'highest_price': sig.get('highest_price', sig['entry']),
+                'lowest_price': sig.get('lowest_price', sig['entry']),
+                'timestamp': sig.get('timestamp', ''),
+                'last_updated': sig.get('last_updated', ''),
+                # Profit/Loss calculation
+                'entry_to_current_pnl_percent': round(((current_price - sig['entry']) / sig['entry']) * 100, 2),
+                'entry_to_tp1_percent': round(abs((sig['take_profit_1'] - sig['entry']) / sig['entry']) * 100, 2),
+                'entry_to_sl_percent': round(abs((sig['stop_loss'] - sig['entry']) / sig['entry']) * 100, 2)
+            }
+            
+            # Journey details — price moved through these levels
+            journey = []
+            entry = sig['entry']
+            tp1 = sig['take_profit_1']
+            tp2 = sig['take_profit_2']
+            sl = sig['stop_loss']
+            low = sig.get('lowest_price', entry)
+            high = sig.get('highest_price', entry)
+            
+            if sig['signal'] == 'SHORT':
+                if low <= tp2:
+                    journey.append("✅ TP2 REACHED (100%)")
+                if low <= tp1:
+                    journey.append("✅ TP1 REACHED (WIN)")
+                if low < entry:
+                    journey.append(f"📉 Price dropped to {low}")
+                journey.append(f"📊 Entry: {entry}")
+                if high > entry:
+                    journey.append(f"📈 Price rose to {high}")
+                if high >= sl:
+                    journey.append("❌ SL REACHED (LOST)")
+            else:  # LONG
+                if high >= tp2:
+                    journey.append("✅ TP2 REACHED (100%)")
+                if high >= tp1:
+                    journey.append("✅ TP1 REACHED (WIN)")
+                if high > entry:
+                    journey.append(f"📈 Price rose to {high}")
+                journey.append(f"📊 Entry: {entry}")
+                if low < entry:
+                    journey.append(f"📉 Price dropped to {low}")
+                if low <= sl:
+                    journey.append("❌ SL REACHED (LOST)")
+            
+            recall['journey'] = journey
+            
+            return recall
+        return None
+
+    def search_signals(self, symbol=None, signal_type=None, status=None, limit=20):
+        """
+        Signal search කරන්න — symbol, type (SHORT/LONG), status (WIN/LOST/ACTIVE) filter කරන්න.
+        """
+        results = []
+        for key, sig in self.signal_tracker.items():
+            if symbol and symbol.upper() not in sig['symbol'].upper():
+                continue
+            if signal_type and sig['signal'] != signal_type:
+                continue
+            if status and sig['status'] != status:
+                continue
+            
+            results.append({
+                'key': key,
+                'symbol': sig['symbol'],
+                'signal': sig['signal'],
+                'entry': sig['entry'],
+                'status': sig['status'],
+                'win_percentage': sig.get('win_percentage', 0),
+                'confidence': sig.get('confidence', 0),
+                'timestamp': sig.get('timestamp', '')
+            })
+        
+        results.sort(key=lambda x: x['timestamp'], reverse=True)
+        return results[:limit]
+
+    # ==================== 5. SIGNAL JOURNEY — 100% FULL PATH ====================
+
+    def get_signal_journey(self, signal_key):
+        """
+        Signal එකේ full journey එක පෙන්වන්න.
+        Entry ඉඳන් TP/SL දක්වා හැම level එකම — 100% විස්තර.
+        """
+        if signal_key not in self.signal_tracker:
+            return None
+        
+        sig = self.signal_tracker[signal_key]
+        
+        ticker = self.get_ticker(sig['symbol'])
+        current_price = ticker['last'] if ticker else sig.get('current_price', sig['entry'])
+        
+        entry = sig['entry']
+        tp1 = sig['take_profit_1']
+        tp2 = sig['take_profit_2']
+        sl = sig['stop_loss']
+        low = sig.get('lowest_price', entry)
+        high = sig.get('highest_price', entry)
+        win_pct = sig.get('win_percentage', 0)
+        
+        journey = {
+            'symbol': sig['symbol'],
+            'signal': sig['signal'],
+            'status': sig['status'],
+            'entry_price': entry,
+            'current_price': current_price,
+            'take_profit_1': tp1,
+            'take_profit_2': tp2,
+            'stop_loss': sl,
+            'lowest_reached': low,
+            'highest_reached': high,
+            'win_percentage': win_pct,
+            'confidence': sig.get('confidence', 0),
+            'timestamp': sig.get('timestamp', ''),
+            'levels': []
+        }
+        
+        # Build all levels this signal traveled through
+        if sig['signal'] == 'SHORT':
+            # Short: price should go DOWN
+            levels = [
+                ('🎯 TP2', tp2, low <= tp2),
+                ('🎯 TP1', tp1, low <= tp1),
+                ('📉 Low Reached', low, True),
+                ('⬇️ Entry', entry, True),
+                ('📈 High Reached', high, True),
+                ('🛑 Stop Loss', sl, high >= sl),
+            ]
+        else:
+            # Long: price should go UP
+            levels = [
+                ('🛑 Stop Loss', sl, low <= sl),
+                ('📉 Low Reached', low, True),
+                ('⬇️ Entry', entry, True),
+                ('📈 High Reached', high, True),
+                ('🎯 TP1', tp1, high >= tp1),
+                ('🎯 TP2', tp2, high >= tp2),
+            ]
+        
+        for name, price, triggered in levels:
+            dist_from_entry = round(((price - entry) / entry) * 100, 2)
+            journey['levels'].append({
+                'name': name,
+                'price': price,
+                'distance_from_entry_percent': dist_from_entry,
+                'triggered': triggered,
+                'status_icon': '✅' if triggered else '⏳'
+            })
+        
+        # Time info
+        try:
+            sig_time = datetime.fromisoformat(sig.get('timestamp', ''))
+            now = datetime.now()
+            elapsed = (now - sig_time).total_seconds()
+            if elapsed < 60:
+                journey['age'] = f"{int(elapsed)}s ago"
+            elif elapsed < 3600:
+                journey['age'] = f"{int(elapsed/60)}m ago"
+            else:
+                journey['age'] = f"{int(elapsed/3600)}h ago"
+        except:
+            journey['age'] = "unknown"
+        
+        return journey
+
+    # ==================== 6. POWER BUY SHANA — WIN NOTIFICATION ====================
+
+    def check_power_buy_shana(self, symbol=None):
+        """
+        WIN උන signals check කරලා "POWER BUY SHANA" notification generate කරන්න.
+        මේක call කරන්නේ signal status update එකට පස්සේ.
+        """
+        self.update_active_signals(symbol)
+        
+        power_signals = []
+        for key, sig in self.signal_tracker.items():
+            if symbol and sig['symbol'] != symbol:
+                continue
+            if sig['status'] != 'WIN':
+                continue
+            
+            tp1 = sig['take_profit_1']
+            tp2 = sig['take_profit_2']
+            entry = sig['entry']
+            low = sig.get('lowest_price', entry)
+            
+            profit_percent = round(abs((tp1 - entry) / entry) * 100, 2)
+            
+            power_signals.append({
+                'key': key,
+                'symbol': sig['symbol'],
+                'signal': sig['signal'],
+                'entry': entry,
+                'take_profit_1': tp1,
+                'take_profit_2': tp2,
+                'stop_loss': sig['stop_loss'],
+                'lowest_price': low,
+                'highest_price': sig.get('highest_price', entry),
+                'profit_percent': profit_percent,
+                'confidence': sig.get('confidence', 0),
+                'timestamp': sig.get('timestamp', ''),
+                'message': (
+                    f"💀🔥 POWER BUY SHANA 🔥💀\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🏆 {sig['signal']} WIN\n"
+                    f"💰 {sig['symbol']}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📥 Entry    : {entry:.8f}\n"
+                    f"🎯 TP1 Hit  : {tp1:.8f}\n"
+                    f"🎯 TP2      : {tp2:.8f}\n"
+                    f"🛑 SL       : {sig['stop_loss']:.8f}\n"
+                    f"📉 Lowest   : {low:.8f}\n"
+                    f"📈 Highest  : {sig.get('highest_price', entry):.8f}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"✅ Profit   : +{profit_percent}%\n"
+                    f"📊 Confidence: {sig.get('confidence', 0)}%\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"⏰ {sig.get('timestamp', '')}\n"
+                    f"💀 BINANCE SHANA SIGNALS"
+                )
+            })
+        
+        return power_signals
+
+    # ==================== 7. FORMATTED DISPLAY HELPERS ====================
+
+    def format_signal_display(self, signal):
+        """
+        Signal එකක් ලස්සනට පෙන්වන්න — colorful box format.
+        Bot box එක විවිධ පාටවලින් design කරන්න.
+        """
+        if not signal:
+            return None
+        
+        symbol = signal['symbol']
+        sig_type = signal['signal']
+        entry = signal['entry']
+        tp1 = signal['take_profit_1']
+        tp2 = signal['take_profit_2']
+        sl = signal['stop_loss']
+        conf = signal.get('confidence', 0)
+        reasons = signal.get('reasons', [])
+        strength = signal.get('strength', 0)
+        rsi = signal.get('rsi', 0)
+        vol_ratio = signal.get('volume_ratio', 0)
+        adx = signal.get('adx', 0)
+        mfi = signal.get('mfi', 0)
+        bb_pct = signal.get('bb_percent', 0)
+        tf = signal.get('timeframe', 'N/A')
+        
+        # Color emojis based on confidence
+        if conf >= 85:
+            header_icon = "💀🔥💀"
+            conf_stars = "⭐⭐⭐⭐⭐"
+        elif conf >= 75:
+            header_icon = "🔥💀🔥"
+            conf_stars = "⭐⭐⭐⭐"
+        elif conf >= 65:
+            header_icon = "⚡💀⚡"
+            conf_stars = "⭐⭐⭐"
+        elif conf >= 50:
+            header_icon = "📊💀📊"
+            conf_stars = "⭐⭐"
+        else:
+            header_icon = "⚠️💀⚠️"
+            conf_stars = "⭐"
+        
+        # Direction arrow
+        if sig_type == 'SHORT':
+            direction = "📉 SELL SHORT"
+            arrow = "⬇️⬇️⬇️"
+        else:
+            direction = "📈 BUY LONG"
+            arrow = "⬆️⬆️⬆️"
+        
+        reason_lines = "\n".join([f"   • {r}" for r in reasons[:6]])
+        
+        display = (
+            f"╔══════════════════════════════════════════╗\n"
+            f"║    💀 BINANCE SHANA SIGNALS 💀           ║\n"
+            f"╠══════════════════════════════════════════╣\n"
+            f"║  {header_icon}  {direction}  {header_icon}   ║\n"
+            f"║  {arrow}                                   ║\n"
+            f"╠══════════════════════════════════════════╣\n"
+            f"║  🪙 Coin        : {symbol:<20s}  ║\n"
+            f"║  ⏰ Timeframe   : {tf:<20s}  ║\n"
+            f"║  🎯 Confidence  : {conf}% {conf_stars:<10s}  ║\n"
+            f"║  📊 Strength    : {strength} reasons            ║\n"
+            f"╠══════════════════════════════════════════╣\n"
+            f"║  📥 Entry       : {entry:<22.8f}  ║\n"
+            f"║  🎯 TP1        : {tp1:<22.8f}  ║\n"
+            f"║  🎯 TP2        : {tp2:<22.8f}  ║\n"
+            f"║  🛑 SL         : {sl:<22.8f}  ║\n"
+            f"╠══════════════════════════════════════════╣\n"
+            f"║  📈 RSI        : {rsi:<8.1f}                  ║\n"
+            f"║  📊 Volume     : {vol_ratio:<8.1f}x                ║\n"
+            f"║  📉 ADX        : {adx:<8.1f}                  ║\n"
+            f"║  💰 MFI        : {mfi:<8.1f}                  ║\n"
+            f"║  📦 BB%        : {bb_pct:<8.1f}%                 ║\n"
+            f"╠══════════════════════════════════════════╣\n"
+            f"║  📋 Reasons:                              ║\n"
+            f"{reason_lines}\n"
+            f"╠══════════════════════════════════════════╣\n"
+            f"║  ⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}          ║\n"
+            f"╚══════════════════════════════════════════╝"
+        )
+        
+        return display
+
+    def format_live_price_display(self, prices):
+        """
+        හැම coin එකකම LIVE price එක ලස්සනට table format එකකට පෙන්වන්න.
+        """
+        if not prices:
+            return "❌ No price data available"
+        
+        lines = [
+            "╔══════════════════════════════════════════════════════════╗",
+            "║              🟢 LIVE PRICE — ALL COINS 🟢               ║",
+            "╠══════════════════════════════════════════════════════════╣",
+            "║  #  │  Coin        │  Price        │  24h%    │  Vol    ║",
+            "╠══════════════════════════════════════════════════════════╣"
+        ]
+        
+        for i, p in enumerate(prices, 1):
+            sym = p['symbol'].replace('/USDT', '')
+            price = p['price']
+            chg = p['change_24h']
+            vol = p.get('volume_24h', 0)
+            
+            # Color coding for 24h change
+            if chg > 5:
+                arrow = "🟢"
+            elif chg > 0:
+                arrow = "🟢"
+            elif chg > -5:
+                arrow = "🔴"
+            else:
+                arrow = "🔴"
+            
+            # Format volume
+            if vol > 1_000_000_000:
+                vol_str = f"${vol/1e9:.1f}B"
+            elif vol > 1_000_000:
+                vol_str = f"${vol/1e6:.1f}M"
+            elif vol > 1_000:
+                vol_str = f"${vol/1e3:.1f}K"
+            else:
+                vol_str = f"${vol:.0f}"
+            
+            line = f"║  {i:2d}  │  {sym:<10s}  │  ${price:<10.4f}  │  {arrow} {chg:>+6.2f}% │  {vol_str:<8s}  ║"
+            lines.append(line)
+        
+        lines.append("╚══════════════════════════════════════════════════════════╝")
+        lines.append(f"📊 Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        return "\n".join(lines)
+
+    def format_stats_display(self, stats):
+        """
+        STATS එක ලස්සනට පෙන්වන්න — WIN/LOSS details උඩින්.
+        """
+        if not stats or stats['total_signals'] == 0:
+            return "❌ No signal data yet"
+        
+        lines = [
+            "╔══════════════════════════════════════════╗",
+            "║        📊 BINANCE SHANA STATS 📊         ║",
+            "╠══════════════════════════════════════════╣",
+            f"║  📈 Total Signals    : {stats['total_signals']:<5d}              ║",
+            f"║  🏆 Total Wins       : {stats['total_wins']:<5d}  🟢🟢🟢         ║",
+            f"║  💀 Total Losses     : {stats['total_losses']:<5d}  🔴🔴🔴         ║",
+            f"║  ⏳ Active           : {stats['active_signals']:<5d}              ║",
+            f"║  ⌛ Expired          : {stats['expired_signals']:<5d}              ║",
+            "╠══════════════════════════════════════════╣",
+            f"║  📊 Win Rate         : {stats['win_rate']:<5.1f}%  {'🏆' if stats['win_rate'] >= 70 else '📊'}              ║",
+            f"║  📊 Loss Rate        : {stats['loss_rate']:<5.1f}%               ║",
+            "╠══════════════════════════════════════════╣"
+        ]
+        
+        # Best signal
+        if stats['best_signal']:
+            best = stats['best_signal']
+            lines.append(f"║  🏆 BEST SIGNAL:                              ║")
+            lines.append(f"║     {best['symbol']} — {best['signal']} — Conf: {best['confidence']}%      ║")
+            lines.append(f"║     Entry: {best['entry']:.8f}                ║")
+        
+        # Worst signal
+        if stats['worst_signal']:
+            worst = stats['worst_signal']
+            lines.append(f"║  💀 WORST SIGNAL:                             ║")
+            lines.append(f"║     {worst['symbol']} — {worst['signal']} — Conf: {worst['confidence']}%      ║")
+            lines.append(f"║     Entry: {worst['entry']:.8f}                ║")
+        
+        lines.append("╠══════════════════════════════════════════╣")
+        
+        # By symbol breakdown
+        if stats['by_symbol']:
+            lines.append("║  📊 PER COIN BREAKDOWN:                      ║")
+            for sym, data in sorted(stats['by_symbol'].items(), key=lambda x: x[1]['wins']/(x[1]['wins']+x[1]['losses']+0.01) if (x[1]['wins']+x[1]['losses']) > 0 else 0, reverse=True)[:10]:
+                completed = data['wins'] + data['losses']
+                wr = round((data['wins'] / completed) * 100, 1) if completed > 0 else 0
+                sym_short = sym.replace('/USDT', '')
+                lines.append(f"║  {sym_short:<8s}  ▶  W:{data['wins']}  L:{data['losses']}  A:{data['active']}  WR:{wr:.1f}%  ║")
+        
+        lines.append("╚══════════════════════════════════════════╝")
+        lines.append(f"🔄 Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        return "\n".join(lines)
+
+    def format_signal_journey_display(self, journey):
+        """
+        Signal journey එක ලස්සනට පෙන්වන්න — හැම level එකම.
+        """
+        if not journey:
+            return "❌ Signal not found"
+        
+        lines = [
+            "╔══════════════════════════════════════════╗",
+            f"║     💀 SIGNAL JOURNEY — {journey['symbol']} 💀      ║",
+            "╠══════════════════════════════════════════╣",
+            f"║  🎯 Type     : {journey['signal']:<25s}  ║",
+            f"║  📊 Status   : {journey['status']:<25s}  ║",
+            f"║  ⏰ Age      : {journey.get('age', 'N/A'):<25s}  ║",
+            f"║  🎯 Confid   : {journey['confidence']}%{' ' * 22}║",
+            "╠══════════════════════════════════════════╣",
+            f"║  📥 Entry    : {journey['entry_price']:<22.8f}  ║",
+            f"║  💰 Current  : {journey['current_price']:<22.8f}  ║",
+            "╠══════════════════════════════════════════╣",
+            "║  📊 LEVELS REACHED:                      ║"
+        ]
+        
+        for lvl in journey['levels']:
+            icon = lvl['status_icon']
+            name = lvl['name']
+            price = lvl['price']
+            dist = lvl['distance_from_entry_percent']
+            triggered_str = "✅" if lvl['triggered'] else "❌"
+            lines.append(f"║  {icon} {name:<15s}  ${price:<14.8f}  {dist:>+8.2f}%  {triggered_str}  ║")
+        
+        lines.append("╠══════════════════════════════════════════╣")
+        lines.append(f"║  📉 Lowest : ${journey['lowest_reached']:<16.8f}        ║")
+        lines.append(f"║  📈 Highest: ${journey['highest_reached']:<16.8f}        ║")
+        lines.append(f"║  🏆 WIN%   : {journey['win_percentage']:<5.1f}%{' ' * 19}║")
+        lines.append("╚══════════════════════════════════════════╝")
+        
+        return "\n".join(lines)
+
+    def get_signal_recall_list(self, limit=20):
+        """
+        හැම track කරපු signal එකකම list එක — recall කරන්න පුළුවන්.
+        Signal DELETE වෙන්නේ නැහැ — හැමෝම ඉතුරු වෙනවා.
+        """
+        results = []
+        for key, sig in sorted(self.signal_tracker.items(), key=lambda x: x[1].get('timestamp', ''), reverse=True)[:limit]:
+            results.append({
+                'key': key,
+                'symbol': sig['symbol'],
+                'signal': sig['signal'],
+                'entry': sig['entry'],
+                'status': sig['status'],
+                'win_percentage': sig.get('win_percentage', 0),
+                'confidence': sig.get('confidence', 0),
+                'timestamp': sig.get('timestamp', '')
+            })
+        return results
