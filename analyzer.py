@@ -1657,3 +1657,159 @@ class BinanceAnalyzer:
                 'timestamp': sig.get('timestamp', '')
             })
         return results
+
+    # =========================================================================
+    # ================ 🆕 NEW: USER SIGNAL TRACKING — අපි ගත්ත signals විතරක් ===
+    # =========================================================================
+    # මේ methods අලුතෙන් add කරලා — USER ගත්ත signals විතරක් track කරනවා
+    # STATS සහ Recall වලට use කරන්නේ මේ signals විතරක්
+    # =========================================================================
+
+    def _ensure_user_signals(self):
+        """User signal tracker initialize කරන්න (lazy)"""
+        if not hasattr(self, '_user_signals_file'):
+            self._user_signals_file = "user_signals.json"
+        if not hasattr(self, '_user_signal_keys'):
+            self._user_signal_keys = self._load_user_signal_keys()
+
+    def _load_user_signal_keys(self):
+        """User signal keys load කරන්න"""
+        try:
+            if hasattr(self, '_user_signals_file') and os.path.exists(self._user_signals_file):
+                with open(self._user_signals_file, 'r') as f:
+                    return set(json.load(f))
+        except Exception as e:
+            logger.warning(f"Could not load user signal keys: {e}")
+        return set()
+
+    def _save_user_signal_keys(self):
+        """User signal keys save කරන්න"""
+        try:
+            if hasattr(self, '_user_signals_file'):
+                # Keep only keys that still exist in signal_tracker
+                self._user_signal_keys = {k for k in self._user_signal_keys if k in self.signal_tracker}
+                with open(self._user_signals_file, 'w') as f:
+                    json.dump(list(self._user_signal_keys), f)
+        except Exception as e:
+            logger.warning(f"Could not save user signal keys: {e}")
+
+    def mark_user_signal(self, symbol, signal_type, entry_price, timestamp):
+        """
+        💀 Signal එකක් USER generated කියලා mark කරන්න.
+        මේක call කරන්නේ USER button click එකකින් signal generate උනාට පස්සේ.
+        
+        STATS සහ Recall වලට පෙන්වන්නේ මේ USER signals විතරක්!
+        auto_signal_loop එකෙන් ආපු signals COUNT වෙන්නේ නැහැ!
+        """
+        self._ensure_user_signals()
+        key = self._get_signal_key(symbol, signal_type, entry_price, timestamp)
+        
+        if key in self.signal_tracker:
+            self._user_signal_keys.add(key)
+            self._save_user_signal_keys()
+            logger.info(f"✅ Marked as USER signal: {key}")
+            return True
+        
+        logger.warning(f"⚠️ Signal not found in tracker: {key}")
+        return False
+
+    def get_user_stats(self):
+        """
+        📊 STATS — USER ගත්ත signals විතරක්.
+        auto_signal_loop / system signals මෙතන COUNT වෙන්නේ නැහැ!
+        """
+        self._ensure_user_signals()
+        
+        stats = {
+            'total_signals': 0,
+            'total_wins': 0,
+            'total_losses': 0,
+            'active_signals': 0,
+            'expired_signals': 0,
+            'win_rate': 0.0,
+            'loss_rate': 0.0,
+            'best_signal': None,
+            'worst_signal': None,
+            'win_details': [],
+            'loss_details': [],
+            'active_details': [],
+            'by_symbol': {}
+        }
+        
+        for key in self._user_signal_keys:
+            if key not in self.signal_tracker:
+                continue
+            sig = self.signal_tracker[key]
+            
+            sym = sig['symbol']
+            if sym not in stats['by_symbol']:
+                stats['by_symbol'][sym] = {'wins': 0, 'losses': 0, 'active': 0, 'total': 0}
+            
+            stats['total_signals'] += 1
+            stats['by_symbol'][sym]['total'] += 1
+            
+            detail = {
+                'key': key,
+                'symbol': sig['symbol'],
+                'signal': sig['signal'],
+                'entry': sig['entry'],
+                'tp1': sig['take_profit_1'],
+                'sl': sig['stop_loss'],
+                'confidence': sig.get('confidence', 0),
+                'win_percentage': sig.get('win_percentage', 0),
+                'current_price': sig.get('current_price', sig['entry']),
+                'timestamp': sig.get('timestamp', ''),
+                'status': sig['status']
+            }
+            
+            if sig['status'] == 'WIN':
+                stats['total_wins'] += 1
+                stats['by_symbol'][sym]['wins'] += 1
+                stats['win_details'].append(detail)
+                if stats['best_signal'] is None or sig.get('confidence', 0) > stats['best_signal'].get('confidence', 0):
+                    stats['best_signal'] = detail
+            elif sig['status'] == 'LOST':
+                stats['total_losses'] += 1
+                stats['by_symbol'][sym]['losses'] += 1
+                stats['loss_details'].append(detail)
+                if stats['worst_signal'] is None:
+                    stats['worst_signal'] = detail
+            elif sig['status'] == 'ACTIVE':
+                stats['active_signals'] += 1
+                stats['by_symbol'][sym]['active'] += 1
+                stats['active_details'].append(detail)
+            elif sig['status'] == 'EXPIRED':
+                stats['expired_signals'] += 1
+        
+        completed = stats['total_wins'] + stats['total_losses']
+        if completed > 0:
+            stats['win_rate'] = round((stats['total_wins'] / completed) * 100, 1)
+            stats['loss_rate'] = round((stats['total_losses'] / completed) * 100, 1)
+        
+        return stats
+
+    def get_user_recall_list(self, limit=50):
+        """
+        🔄 Recall — USER ගත්ත signals විතරක්.
+        හැම USER signal එකක්ම DELETE වෙන්නේ නැහැ — ඉතුරු වෙනවා!
+        """
+        self._ensure_user_signals()
+        
+        results = []
+        for key in self._user_signal_keys:
+            if key not in self.signal_tracker:
+                continue
+            sig = self.signal_tracker[key]
+            results.append({
+                'key': key,
+                'symbol': sig['symbol'],
+                'signal': sig['signal'],
+                'entry': sig['entry'],
+                'status': sig['status'],
+                'win_percentage': sig.get('win_percentage', 0),
+                'confidence': sig.get('confidence', 0),
+                'timestamp': sig.get('timestamp', '')
+            })
+        
+        results.sort(key=lambda x: x['timestamp'], reverse=True)
+        return results[:limit]
