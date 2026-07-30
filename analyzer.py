@@ -24,18 +24,18 @@ class BinanceAnalyzer:
         try:
             with open(self.data_file, 'r') as f:
                 self.signal_tracker = json.load(f)
-            logger.info(f"📂 Loaded {len(self.signal_tracker)} signals from {self.data_file}")
+            logger.info(f"Loaded {len(self.signal_tracker)} signals from {self.data_file}")
         except (FileNotFoundError, json.JSONDecodeError):
             self.signal_tracker = {}
-            logger.info(f"📂 No signal file found, starting fresh")
+            logger.info(f"No signal file found, starting fresh")
 
     def _save_signals(self):
         try:
             with open(self.data_file, 'w') as f:
                 json.dump(self.signal_tracker, f, indent=2)
-            logger.info(f"💾 Saved {len(self.signal_tracker)} signals to {self.data_file}")
+            logger.info(f"Saved {len(self.signal_tracker)} signals to {self.data_file}")
         except Exception as e:
-            logger.error(f"❌ Save error: {e}")
+            logger.error(f"Save error: {e}")
 
     # ============ API HELPERS ============
     def _make_request(self, endpoint, params=None):
@@ -107,7 +107,6 @@ class BinanceAnalyzer:
         return opens, highs, lows, closes, volumes, times
 
     def make_decision(self, symbol):
-        """Main decision-making method (your original)"""
         try:
             klines_15m = self.get_klines(symbol, '15m', 100)
             klines_1h = self.get_klines(symbol, '1h', 100)
@@ -254,11 +253,10 @@ class BinanceAnalyzer:
             return result
 
         except Exception as e:
-            logger.error(f"❌ Decision error: {e}")
+            logger.error(f"Decision error: {e}")
             return None
 
     def _add_journey_entry(self, symbol, signal, entry, tp1, sl, confidence, win_pct):
-        """Add signal journey entry (your original)"""
         try:
             timestamp = str(datetime.now())
             signal_key = f"{symbol}_{timestamp}"
@@ -278,14 +276,14 @@ class BinanceAnalyzer:
             }
             self._save_signals()
         except Exception as e:
-            logger.error(f"❌ Journey add error: {e}")
+            logger.error(f"Journey add error: {e}")
 
     def format_signal_journey_display(self, journey):
         if not journey:
             return "No journey data"
         lines = [
-            f"📋 SIGNAL JOURNEY: {journey.get('symbol', '')}",
-            f"{'═'*40}",
+            f"SIGNAL JOURNEY: {journey.get('symbol', '')}",
+            f"{'='*40}",
             f"Signal: {journey.get('signal', '')}",
             f"Entry: ${journey.get('entry', 0):.8f}",
             f"TP1: ${journey.get('tp1', 0):.8f}",
@@ -296,16 +294,13 @@ class BinanceAnalyzer:
             f"Time: {journey.get('timestamp', '')[:19]}",
         ]
         if journey.get('history'):
-            lines.append(f"{'═'*40}")
+            lines.append(f"{'='*40}")
             for h in journey['history']:
                 lines.append(f"  {h.get('time','')[:16]} - ${h.get('price',0):.8f} ({h.get('action','')})")
         return '\n'.join(lines)
 
-    # ============ 🔥 NEW: USER-SPECIFIC SIGNAL TRACKING (for STATS & Recall) ============
     def mark_user_signal(self, symbol, signal_type, entry, timestamp):
-        """Mark a signal as belonging to USER (for STATS/Recall filtering only)"""
         try:
-            # Try exact match first
             for key, sig in list(self.signal_tracker.items()):
                 if (sig.get('symbol') == symbol and 
                     sig.get('signal') == signal_type and
@@ -315,26 +310,24 @@ class BinanceAnalyzer:
                     sig['is_user_signal'] = True
                     sig['user_timestamp'] = str(datetime.now())
                     self._save_signals()
-                    logger.info(f"✅ Marked user signal: {symbol} {signal_type}")
+                    logger.info(f"Marked user signal: {symbol} {signal_type}")
                     return True
             
-            # Fallback: match by symbol + signal type only
             for key, sig in list(self.signal_tracker.items()):
                 if sig.get('symbol') == symbol and sig.get('signal') == signal_type:
                     sig['is_user_signal'] = True
                     sig['user_timestamp'] = str(datetime.now())
                     self._save_signals()
-                    logger.info(f"✅ Marked user signal (generic): {symbol} {signal_type}")
+                    logger.info(f"Marked user signal (generic): {symbol} {signal_type}")
                     return True
             
-            logger.warning(f"⚠️ Could not find signal to mark: {symbol} {signal_type}")
+            logger.warning(f"Could not find signal to mark: {symbol} {signal_type}")
             return False
         except Exception as e:
             logger.error(f"mark_user_signal error: {e}")
             return False
 
     def get_user_stats(self):
-        """Get stats for USER signals only (not system/scan signals)"""
         stats = {
             'total_signals': 0, 'total_wins': 0, 'total_losses': 0,
             'active_signals': 0, 'expired_signals': 0,
@@ -397,7 +390,6 @@ class BinanceAnalyzer:
         return stats
 
     def get_user_recall_list(self, limit=50):
-        """Get recall list for USER signals only (not system/scan signals)"""
         user_signals = []
         for key, sig in self.signal_tracker.items():
             if sig.get('is_user_signal') == True:
@@ -415,7 +407,6 @@ class BinanceAnalyzer:
         user_signals.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
         return user_signals[:limit]
 
-    # ============ ORIGINAL HELPER METHODS (keep as-is) ============
     def _sma(self, values, period):
         sma = []
         for i in range(len(values)):
@@ -484,18 +475,10 @@ class BinanceAnalyzer:
             atr.insert(0, atr[0])
         return atr[:len(close)]
 
-
-    # ╔══════════════════════════════════════════════════════════════════════════╗
-    # ║  📊 50 ANALYSIS METHODS FOR BINANCE — FULL SUITE                       ║
-    # ║  Trend(1-12) | Momentum(13-24) | Volume(25-32) | Volatility(33-39)     ║
-    # ║  S/R(40-46) | Advanced(47-50)                                          ║
-    # ╚══════════════════════════════════════════════════════════════════════════╝
-
-    # ===================== STATIC HELPER CALCULATIONS =====================
+    # ==================== STATIC HELPERS ====================
 
     @staticmethod
     def _calc_ema(values, period):
-        """Exponential Moving Average"""
         multiplier = 2 / (period + 1)
         ema = [values[0]]
         for i in range(1, len(values)):
@@ -504,7 +487,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_sma(values, period):
-        """Simple Moving Average"""
         sma = []
         for i in range(len(values)):
             if i < period - 1:
@@ -515,7 +497,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_rsi(values, period=14):
-        """RSI Calculation"""
         deltas = [values[i] - values[i-1] for i in range(1, len(values))]
         gains = [d if d > 0 else 0 for d in deltas]
         losses = [-d if d < 0 else 0 for d in deltas]
@@ -533,7 +514,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_macd(close, fast=12, slow=26, signal=9):
-        """MACD Line, Signal Line, Histogram"""
         ema_fast = BinanceAnalyzer._calc_ema(close, fast)
         ema_slow = BinanceAnalyzer._calc_ema(close, slow)
         macd_line = [ema_fast[i] - ema_slow[i] for i in range(len(close))]
@@ -543,7 +523,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_bollinger_bands(close, period=20, std_dev=2):
-        """Bollinger Bands (Upper, Middle, Lower)"""
         sma = BinanceAnalyzer._calc_sma(close, period)
         upper = [None] * len(close)
         lower = [None] * len(close)
@@ -558,7 +537,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_atr(high, low, close, period=14):
-        """Average True Range"""
         tr = [high[0] - low[0]]
         for i in range(1, len(close)):
             hl = high[i] - low[i]
@@ -575,7 +553,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_stoch_rsi(close, period=14, k_period=3, d_period=3):
-        """Stochastic RSI"""
         rsi = BinanceAnalyzer._calc_rsi(close, period)
         raw_stoch = [50.0] * len(rsi)
         for i in range(period, len(rsi)):
@@ -592,7 +569,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_supertrend(high, low, close, period=10, multiplier=3):
-        """SuperTrend"""
         atr = BinanceAnalyzer._calc_atr(high, low, close, period)
         hl2 = [(high[i] + low[i]) / 2 for i in range(len(close))]
         basic_upper = [hl2[i] + multiplier * atr[i] for i in range(len(close))]
@@ -614,29 +590,27 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_ichimoku(high, low, close, tenkan=9, kijun=26, senkou_b=52):
-        """Ichimoku Cloud"""
         n = len(close)
         tenkan_sen = [None] * n
         kijun_sen = [None] * n
         senkou_a = [None] * n
-        senkou_b = [None] * n
+        senkou_b_arr = [None] * n
         chikou = [None] * n
         for i in range(tenkan - 1, n):
             tenkan_sen[i] = (max(high[i-tenkan+1:i+1]) + min(low[i-tenkan+1:i+1])) / 2
         for i in range(kijun - 1, n):
             kijun_sen[i] = (max(high[i-kijun+1:i+1]) + min(low[i-kijun+1:i+1])) / 2
         for i in range(senkou_b - 1, n):
-            senkou_b[i] = (max(high[i-senkou_b+1:i+1]) + min(low[i-senkou_b+1:i+1])) / 2
+            senkou_b_arr[i] = (max(high[i-senkou_b+1:i+1]) + min(low[i-senkou_b+1:i+1])) / 2
         for i in range(len(tenkan_sen)):
             if tenkan_sen[i] is not None and kijun_sen[i] is not None:
                 senkou_a[i] = (tenkan_sen[i] + kijun_sen[i]) / 2
         for i in range(n):
             chikou[i] = close[i] if i + kijun < n else None
-        return tenkan_sen, kijun_sen, senkou_a, senkou_b, chikou
+        return tenkan_sen, kijun_sen, senkou_a, senkou_b_arr, chikou
 
     @staticmethod
     def _calc_mfi(high, low, close, volume, period=14):
-        """Money Flow Index"""
         typical = [(high[i] + low[i] + close[i]) / 3 for i in range(len(close))]
         mf = [typical[i] * volume[i] for i in range(len(close))]
         mfi = [50.0] * len(close)
@@ -656,7 +630,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_obv(close, volume):
-        """On-Balance Volume"""
         obv = [0.0] * len(close)
         for i in range(1, len(close)):
             if close[i] > close[i-1]:
@@ -669,7 +642,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_cmf(high, low, close, volume, period=20):
-        """Chaikin Money Flow"""
         mfm = [((close[i] - low[i]) - (high[i] - close[i])) / (high[i] - low[i]) if high[i] != low[i] else 0 for i in range(len(close))]
         mfv = [mfm[i] * volume[i] for i in range(len(close))]
         cmf = [0.0] * len(close)
@@ -681,7 +653,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_cci(high, low, close, period=20):
-        """Commodity Channel Index"""
         tp = [(high[i] + low[i] + close[i]) / 3 for i in range(len(close))]
         sma_tp = BinanceAnalyzer._calc_sma(tp, period)
         cci = [0.0] * len(close)
@@ -692,7 +663,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_volume_profile(high, low, volume, num_bins=12):
-        """Simple Volume Profile (VPVR)"""
         price_range = max(high) - min(low)
         bin_size = price_range / num_bins if price_range != 0 else 1
         bins = {}
@@ -704,14 +674,13 @@ class BinanceAnalyzer:
                 bins[bin_price] = 0
             bins[bin_price] += volume[i]
         poc_price = max(bins, key=bins.get) if bins else (high[-1] + low[-1]) / 2
-        bin_size_actual = (max(high) - min(low)) / num_bins if price_range != 0 else 1
-        value_area_low = poc_price - bin_size_actual if poc_price - bin_size_actual >= min(low) else min(low)
-        value_area_high = poc_price + bin_size_actual if poc_price + bin_size_actual <= max(high) else max(high)
-        return {'poc': poc_price, 'value_area_low': value_area_low, 'value_area_high': value_area_high, 'bins': bins}
+        bin_sz = (max(high) - min(low)) / num_bins if price_range != 0 else 1
+        val = poc_price - bin_sz if poc_price - bin_sz >= min(low) else min(low)
+        vah = poc_price + bin_sz if poc_price + bin_sz <= max(high) else max(high)
+        return {'poc': poc_price, 'value_area_low': val, 'value_area_high': vah, 'bins': bins}
 
     @staticmethod
     def _calc_pivot_points(high, low, close):
-        """Standard Pivot Points"""
         pp = (high[-1] + low[-1] + close[-1]) / 3
         r1 = 2 * pp - low[-1]
         r2 = pp + (high[-1] - low[-1])
@@ -723,21 +692,19 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_fib_retracement(high, low):
-        """Fibonacci Retracement Levels"""
-        range_val = max(high) - min(low)
+        rng = max(high) - min(low)
         return {
             '0.0': max(high),
-            '0.236': max(high) - 0.236 * range_val,
-            '0.382': max(high) - 0.382 * range_val,
-            '0.5': max(high) - 0.5 * range_val,
-            '0.618': max(high) - 0.618 * range_val,
-            '0.786': max(high) - 0.786 * range_val,
+            '0.236': max(high) - 0.236 * rng,
+            '0.382': max(high) - 0.382 * rng,
+            '0.5': max(high) - 0.5 * rng,
+            '0.618': max(high) - 0.618 * rng,
+            '0.786': max(high) - 0.786 * rng,
             '1.0': min(low)
         }
 
     @staticmethod
     def _calc_fvg(high, low, close, lookback=10):
-        """Fair Value Gap detection"""
         fvg_signals = []
         for i in range(1, len(close) - 1):
             if low[i+1] > high[i-1]:
@@ -748,7 +715,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_chop_index(high, low, close, period=14):
-        """Choppiness Index"""
         import math
         tr = [high[0] - low[0]]
         for i in range(1, len(close)):
@@ -772,7 +738,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_connors_rsi(close, period=3, streak_period=2, percentile_period=100):
-        """Connors RSI"""
         rsi = BinanceAnalyzer._calc_rsi(close, period)
         streak = [0] * len(close)
         for i in range(1, len(close)):
@@ -792,7 +757,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_dpo(close, period=14):
-        """Detrended Price Oscillator"""
         sma = BinanceAnalyzer._calc_sma(close, period)
         shift = period // 2 + 1
         dpo = [0.0] * len(close)
@@ -803,7 +767,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_smi_ergodic(close, period=14, smooth1=3, smooth2=3):
-        """SMI Ergodic Indicator"""
         high_max = [0.0] * len(close)
         low_min = [0.0] * len(close)
         for i in range(period - 1, len(close)):
@@ -819,7 +782,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_force_index(close, volume, period=13):
-        """Elder's Force Index"""
         force = [0.0] * len(close)
         for i in range(1, len(close)):
             force[i] = (close[i] - close[i-1]) * volume[i]
@@ -828,7 +790,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_nvi(close, volume):
-        """Negative Volume Index"""
         nvi = [1000.0] * len(close)
         for i in range(1, len(close)):
             if volume[i] < volume[i-1]:
@@ -839,7 +800,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_pvi(close, volume):
-        """Positive Volume Index"""
         pvi = [1000.0] * len(close)
         for i in range(1, len(close)):
             if volume[i] > volume[i-1]:
@@ -850,7 +810,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_ad_line(high, low, close, volume):
-        """Accumulation/Distribution Line"""
         ad = [0.0] * len(close)
         for i in range(1, len(close)):
             mfm = ((close[i] - low[i]) - (high[i] - close[i])) / (high[i] - low[i]) if high[i] != low[i] else 0
@@ -859,7 +818,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_chaikin_volatility(high, low, period=10, ema_period=10):
-        """Chaikin Volatility"""
         hl_range = [high[i] - low[i] for i in range(len(high))]
         ema_range = BinanceAnalyzer._calc_ema(hl_range, ema_period)
         cv = [0.0] * len(high)
@@ -870,7 +828,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_standard_error_bands(close, period=20, deviations=2):
-        """Standard Error Bands"""
         sma = BinanceAnalyzer._calc_sma(close, period)
         upper = [None] * len(close)
         lower = [None] * len(close)
@@ -891,7 +848,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_squeeze_momentum(high, low, close, bb_period=20, bb_std=2, kc_period=20, kc_mult=1.5):
-        """Squeeze Momentum (LazyBear)"""
         bb_upper, bb_mid, bb_lower = BinanceAnalyzer._calc_bollinger_bands(close, bb_period, bb_std)
         atr = BinanceAnalyzer._calc_atr(high, low, close, kc_period)
         ema = BinanceAnalyzer._calc_ema(close, kc_period)
@@ -925,7 +881,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_hma(values, period=20):
-        """Hull Moving Average"""
         half_period = period // 2
         sqrt_period = int(period ** 0.5)
         wma_half = []
@@ -963,7 +918,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_keltner(high, low, close, period=20, multiplier=2):
-        """Keltner Channels"""
         ema = BinanceAnalyzer._calc_ema(close, period)
         atr = BinanceAnalyzer._calc_atr(high, low, close, period)
         upper = [ema[i] + multiplier * atr[i] for i in range(len(close))]
@@ -972,7 +926,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_donchian(high, low, period=20):
-        """Donchian Channels"""
         upper = [0.0] * len(high)
         lower = [0.0] * len(high)
         middle = [0.0] * len(high)
@@ -984,7 +937,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_parabolic_sar(high, low, acceleration=0.02, max_acceleration=0.2):
-        """Parabolic SAR"""
         sar = [0.0] * len(high)
         ep = [0.0] * len(high)
         af = [acceleration] * len(high)
@@ -1031,7 +983,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_mcginley(close, period=20):
-        """McGinley Dynamic"""
         md = [close[0]]
         for i in range(1, len(close)):
             if md[-1] != 0:
@@ -1042,7 +993,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_dema(values, period=20):
-        """Double EMA"""
         ema1 = BinanceAnalyzer._calc_ema(values, period)
         ema2 = BinanceAnalyzer._calc_ema(ema1, period)
         dema = [2 * ema1[i] - ema2[i] for i in range(len(values))]
@@ -1050,7 +1000,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_tema(values, period=20):
-        """Triple EMA"""
         ema1 = BinanceAnalyzer._calc_ema(values, period)
         ema2 = BinanceAnalyzer._calc_ema(ema1, period)
         ema3 = BinanceAnalyzer._calc_ema(ema2, period)
@@ -1059,7 +1008,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_awesome_oscillator(high, low, fast=5, slow=34):
-        """Awesome Oscillator"""
         hl_avg = [(high[i] + low[i]) / 2 for i in range(len(high))]
         sma_fast = BinanceAnalyzer._calc_sma(hl_avg, fast)
         sma_slow = BinanceAnalyzer._calc_sma(hl_avg, slow)
@@ -1072,7 +1020,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_accelerator_oscillator(high, low, fast=5, slow=34):
-        """Accelerator Oscillator"""
         ao = BinanceAnalyzer._calc_awesome_oscillator(high, low, fast, slow)
         sma_ao = BinanceAnalyzer._calc_sma(ao, 5)
         ac = []
@@ -1083,7 +1030,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_cmo(close, period=14):
-        """Chande Momentum Oscillator"""
         sm = [0.0] * len(close)
         for i in range(1, len(close)):
             sm[i] = close[i] - close[i-1]
@@ -1099,7 +1045,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_bollinger_b(close, period=20, std_dev=2):
-        """Bollinger %B"""
         upper, mid, lower = BinanceAnalyzer._calc_bollinger_bands(close, period, std_dev)
         b = [0.5] * len(close)
         for i in range(len(close)):
@@ -1109,7 +1054,6 @@ class BinanceAnalyzer:
 
     @staticmethod
     def _calc_bbw(close, period=20, std_dev=2):
-        """Bollinger Bands Width"""
         upper, mid, lower = BinanceAnalyzer._calc_bollinger_bands(close, period, std_dev)
         bbw = [0.0] * len(close)
         for i in range(len(close)):
@@ -1117,10 +1061,7 @@ class BinanceAnalyzer:
                 bbw[i] = (upper[i] - lower[i]) / mid[i]
         return bbw
 
-    # ===================== END STATIC HELPERS =====================
-
     def _prepare_ohlcv(self, symbol, interval, limit):
-        """Fetch and parse klines into OHLCV arrays"""
         data = self._make_request("/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
         if not data:
             return None, None, None, None, None, None
@@ -1132,10 +1073,9 @@ class BinanceAnalyzer:
         times = [k[0] for k in data]
         return open_p, high, low, close, volume, times
 
-    # ==================== 🟢 TREND FOLLOWING METHODS (1-12) ====================
+    # ==================== TREND FOLLOWING METHODS (1-12) ====================
 
     def analyze_ema_50_200(self, symbol, interval='1h', limit=200):
-        """Method 1: EMA 50/200 Golden/Death Cross"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'EMA 50/200', 'num': 1}
@@ -1146,16 +1086,15 @@ class BinanceAnalyzer:
         prev_50 = ema50[-2] if len(ema50) > 1 else last_50
         prev_200 = ema200[-2] if len(ema200) > 1 else last_200
         if prev_50 <= prev_200 and last_50 > last_200:
-            return {'signal': 'BUY', 'confidence': 80, 'method': 'EMA 50/200 Golden Cross', 'num': 1, 'ema50': last_50, 'ema200': last_200}
+            return {'signal': 'BUY', 'confidence': 80, 'method': 'EMA 50/200 Golden Cross', 'num': 1}
         elif prev_50 >= prev_200 and last_50 < last_200:
-            return {'signal': 'SELL', 'confidence': 80, 'method': 'EMA 50/200 Death Cross', 'num': 1, 'ema50': last_50, 'ema200': last_200}
+            return {'signal': 'SELL', 'confidence': 80, 'method': 'EMA 50/200 Death Cross', 'num': 1}
         elif last_50 > last_200:
-            return {'signal': 'BUY', 'confidence': 40, 'method': 'EMA 50 > 200 (Bullish)', 'num': 1, 'ema50': last_50, 'ema200': last_200}
+            return {'signal': 'BUY', 'confidence': 40, 'method': 'EMA 50 > 200', 'num': 1}
         else:
-            return {'signal': 'SELL', 'confidence': 40, 'method': 'EMA 50 < 200 (Bearish)', 'num': 1, 'ema50': last_50, 'ema200': last_200}
+            return {'signal': 'SELL', 'confidence': 40, 'method': 'EMA 50 < 200', 'num': 1}
 
     def analyze_sma_50_200(self, symbol, interval='1h', limit=200):
-        """Method 2: SMA 50/200 Golden/Death Cross"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'SMA 50/200', 'num': 2}
@@ -1175,7 +1114,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 35, 'method': 'SMA 50 < 200', 'num': 2}
 
     def analyze_supertrend(self, symbol, interval='1h', limit=100):
-        """Method 3: SuperTrend"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'SuperTrend', 'num': 3}
@@ -1186,7 +1124,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 70, 'method': 'SuperTrend Downtrend', 'num': 3, 'stop': upper[-1]}
 
     def analyze_ichimoku(self, symbol, interval='1h', limit=100):
-        """Method 4: Ichimoku Cloud"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Ichimoku Cloud', 'num': 4}
@@ -1217,7 +1154,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 30, 'method': 'Ichimoku Neutral', 'num': 4}
 
     def analyze_hma(self, symbol, interval='1h', limit=100):
-        """Method 5: Hull Moving Average"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'HMA', 'num': 5}
@@ -1234,7 +1170,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 30, 'method': 'HMA Bearish', 'num': 5}
 
     def analyze_keltner(self, symbol, interval='1h', limit=100):
-        """Method 6: Keltner Channels"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Keltner Channels', 'num': 6}
@@ -1250,7 +1185,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 25, 'method': 'Keltner Bearish Bias', 'num': 6}
 
     def analyze_donchian(self, symbol, interval='1h', limit=100):
-        """Method 7: Donchian Channels"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Donchian Channels', 'num': 7}
@@ -1266,7 +1200,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 20, 'method': 'Donchian Bearish', 'num': 7}
 
     def analyze_parabolic_sar(self, symbol, interval='1h', limit=100):
-        """Method 8: Parabolic SAR"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Parabolic SAR', 'num': 8}
@@ -1279,7 +1212,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 15, 'method': 'Parabolic SAR Neutral', 'num': 8}
 
     def analyze_heikin_ashi(self, symbol, interval='1h', limit=50):
-        """Method 9: Heikin Ashi Smoothed"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Heikin Ashi', 'num': 9}
@@ -1296,7 +1228,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 20, 'method': 'Heikin Ashi Indecision', 'num': 9}
 
     def analyze_mcginley(self, symbol, interval='1h', limit=100):
-        """Method 10: McGinley Dynamic"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'McGinley Dynamic', 'num': 10}
@@ -1311,7 +1242,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 25, 'method': 'McGinley Bearish', 'num': 10}
 
     def analyze_dema(self, symbol, interval='1h', limit=100):
-        """Method 11: Double EMA"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'DEMA', 'num': 11}
@@ -1326,7 +1256,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 25, 'method': 'DEMA Bearish', 'num': 11}
 
     def analyze_tema(self, symbol, interval='1h', limit=100):
-        """Method 12: Triple EMA"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'TEMA', 'num': 12}
@@ -1340,10 +1269,9 @@ class BinanceAnalyzer:
         else:
             return {'signal': 'SELL', 'confidence': 28, 'method': 'TEMA Bearish', 'num': 12}
 
-    # ==================== 🔵 MOMENTUM & OSCILLATORS (13-24) ====================
+    # ==================== MOMENTUM & OSCILLATORS (13-24) ====================
 
     def analyze_rsi(self, symbol, interval='1h', limit=100):
-        """Method 13: RSI"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'RSI', 'num': 13}
@@ -1361,15 +1289,14 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 15, 'method': 'RSI Neutral', 'num': 13, 'rsi': val}
 
     def analyze_stoch_rsi(self, symbol, interval='1h', limit=100):
-        """Method 14: Stochastic RSI"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Stochastic RSI', 'num': 14}
         k, d, raw = self._calc_stoch_rsi(cl, 14, 3, 3)
         if k[-1] < 10 and d[-1] < 10:
-            return {'signal': 'BUY', 'confidence': 80, 'method': 'StochRSI OB', 'num': 14, 'k': k[-1], 'd': d[-1]}
+            return {'signal': 'BUY', 'confidence': 80, 'method': 'StochRSI Oversold', 'num': 14, 'k': k[-1], 'd': d[-1]}
         elif k[-1] > 90 and d[-1] > 90:
-            return {'signal': 'SELL', 'confidence': 80, 'method': 'StochRSI OS', 'num': 14, 'k': k[-1], 'd': d[-1]}
+            return {'signal': 'SELL', 'confidence': 80, 'method': 'StochRSI Overbought', 'num': 14, 'k': k[-1], 'd': d[-1]}
         elif k[-1] < 20 and d[-1] < 20:
             return {'signal': 'BUY', 'confidence': 50, 'method': 'StochRSI Low', 'num': 14}
         elif k[-1] > 80 and d[-1] > 80:
@@ -1382,15 +1309,14 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'StochRSI Neutral', 'num': 14}
 
     def analyze_macd(self, symbol, interval='1h', limit=100):
-        """Method 15: MACD"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'MACD', 'num': 15}
         macd, signal, hist = self._calc_macd(cl, 12, 26, 9)
         if hist[-1] > 0 and hist[-2] <= 0:
-            return {'signal': 'BUY', 'confidence': 78, 'method': 'MACD Histogram Bullish Cross', 'num': 15}
+            return {'signal': 'BUY', 'confidence': 78, 'method': 'MACD Histo Bullish Cross', 'num': 15}
         elif hist[-1] < 0 and hist[-2] >= 0:
-            return {'signal': 'SELL', 'confidence': 78, 'method': 'MACD Histogram Bearish Cross', 'num': 15}
+            return {'signal': 'SELL', 'confidence': 78, 'method': 'MACD Histo Bearish Cross', 'num': 15}
         elif macd[-1] > signal[-1] and macd[-2] <= signal[-2]:
             return {'signal': 'BUY', 'confidence': 72, 'method': 'MACD Bullish Cross', 'num': 15}
         elif macd[-1] < signal[-1] and macd[-2] >= signal[-2]:
@@ -1403,7 +1329,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'MACD Neutral', 'num': 15}
 
     def analyze_awesome_oscillator(self, symbol, interval='1h', limit=100):
-        """Method 16: Awesome Oscillator"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Awesome Oscillator', 'num': 16}
@@ -1420,7 +1345,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'AO Neutral', 'num': 16}
 
     def analyze_accelerator_oscillator(self, symbol, interval='1h', limit=100):
-        """Method 17: Accelerator Oscillator"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Accelerator Oscillator', 'num': 17}
@@ -1435,7 +1359,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 20, 'method': 'AC Negative', 'num': 17}
 
     def analyze_cmo(self, symbol, interval='1h', limit=100):
-        """Method 18: Chande Momentum Oscillator"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'CMO', 'num': 18}
@@ -1452,7 +1375,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'CMO Neutral', 'num': 18}
 
     def analyze_cci(self, symbol, interval='1h', limit=100):
-        """Method 19: Commodity Channel Index"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'CCI', 'num': 19}
@@ -1469,7 +1391,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'CCI Neutral', 'num': 19}
 
     def analyze_mfi(self, symbol, interval='1h', limit=100):
-        """Method 20: Money Flow Index"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'MFI', 'num': 20}
@@ -1486,7 +1407,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'MFI Neutral', 'num': 20}
 
     def analyze_cmf(self, symbol, interval='1h', limit=100):
-        """Method 21: Chaikin Money Flow"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'CMF', 'num': 21}
@@ -1503,7 +1423,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'CMF Neutral', 'num': 21}
 
     def analyze_connors_rsi(self, symbol, interval='1h', limit=100):
-        """Method 22: Connors RSI"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Connors RSI', 'num': 22}
@@ -1520,7 +1439,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'CRSI Neutral', 'num': 22}
 
     def analyze_dpo(self, symbol, interval='1h', limit=100):
-        """Method 23: Detrended Price Oscillator"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'DPO', 'num': 23}
@@ -1535,7 +1453,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 20, 'method': 'DPO Bearish', 'num': 23}
 
     def analyze_smi_ergodic(self, symbol, interval='1h', limit=100):
-        """Method 24: SMI Ergodic Indicator"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'SMI Ergodic', 'num': 24}
@@ -1551,10 +1468,9 @@ class BinanceAnalyzer:
         else:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'SMI Neutral', 'num': 24}
 
-    # ==================== 🟣 VOLUME-BASED METHODS (25-32) ====================
+    # ==================== VOLUME-BASED METHODS (25-32) ====================
 
     def analyze_volume_profile(self, symbol, interval='1h', limit=100):
-        """Method 25: Volume Profile Visible Range"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Volume Profile', 'num': 25}
@@ -1570,7 +1486,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 15, 'method': 'VPVR In Value Area', 'num': 25}
 
     def analyze_anchored_vwap(self, symbol, interval='1h', limit=100):
-        """Method 26: Anchored VWAP"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Anchored VWAP', 'num': 26}
@@ -1589,7 +1504,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 25, 'method': 'VWAP Above', 'num': 26}
 
     def analyze_obv(self, symbol, interval='1h', limit=100):
-        """Method 27: On-Balance Volume"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'OBV', 'num': 27}
@@ -1605,7 +1519,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 20, 'method': 'OBV Bearish', 'num': 27}
 
     def analyze_vwma(self, symbol, interval='1h', limit=100):
-        """Method 28: Volume Weighted MA"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'VWMA', 'num': 28}
@@ -1628,7 +1541,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 25, 'method': 'VWMA Bearish', 'num': 28}
 
     def analyze_force_index(self, symbol, interval='1h', limit=100):
-        """Method 29: Elder's Force Index"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Force Index', 'num': 29}
@@ -1643,7 +1555,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 20, 'method': 'Force Index Negative', 'num': 29}
 
     def analyze_nvi(self, symbol, interval='1h', limit=100):
-        """Method 30: Negative Volume Index"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'NVI', 'num': 30}
@@ -1655,7 +1566,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 40, 'method': 'NVI Bearish', 'num': 30}
 
     def analyze_pvi(self, symbol, interval='1h', limit=100):
-        """Method 31: Positive Volume Index"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'PVI', 'num': 31}
@@ -1667,7 +1577,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 35, 'method': 'PVI Bearish', 'num': 31}
 
     def analyze_ad_line(self, symbol, interval='1h', limit=100):
-        """Method 32: Accumulation/Distribution Line"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'A/D Line', 'num': 32}
@@ -1682,10 +1591,9 @@ class BinanceAnalyzer:
         else:
             return {'signal': 'SELL', 'confidence': 20, 'method': 'A/D Distributing', 'num': 32}
 
-    # ==================== 🟡 VOLATILITY & BREAKOUT (33-39) ====================
+    # ==================== VOLATILITY & BREAKOUT (33-39) ====================
 
     def analyze_bollinger_bands(self, symbol, interval='1h', limit=100):
-        """Method 33: Bollinger Bands"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Bollinger Bands', 'num': 33}
@@ -1693,17 +1601,16 @@ class BinanceAnalyzer:
         if lower[-1] is not None and upper[-1] is not None:
             price = cl[-1]
             if price <= lower[-1]:
-                return {'signal': 'BUY', 'confidence': 75, 'method': 'Bollinger Lower Band Touch', 'num': 33}
+                return {'signal': 'BUY', 'confidence': 75, 'method': 'BB Lower Band Touch', 'num': 33}
             elif price >= upper[-1]:
-                return {'signal': 'SELL', 'confidence': 75, 'method': 'Bollinger Upper Band Touch', 'num': 33}
+                return {'signal': 'SELL', 'confidence': 75, 'method': 'BB Upper Band Touch', 'num': 33}
             elif price < mid[-1]:
-                return {'signal': 'BUY', 'confidence': 20, 'method': 'Bollinger Below Mid', 'num': 33}
+                return {'signal': 'BUY', 'confidence': 20, 'method': 'BB Below Mid', 'num': 33}
             else:
-                return {'signal': 'SELL', 'confidence': 20, 'method': 'Bollinger Above Mid', 'num': 33}
+                return {'signal': 'SELL', 'confidence': 20, 'method': 'BB Above Mid', 'num': 33}
         return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Bollinger Bands', 'num': 33}
 
     def analyze_atr(self, symbol, interval='1h', limit=100):
-        """Method 34: ATR"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'ATR', 'num': 34}
@@ -1712,20 +1619,19 @@ class BinanceAnalyzer:
         if atr_pct > 5:
             return {'signal': 'SELL', 'confidence': 35, 'method': 'ATR High Volatility', 'num': 34, 'atr%': atr_pct}
         elif atr_pct < 1:
-            return {'signal': 'BUY', 'confidence': 30, 'method': 'ATR Low Volatility (Squeeze)', 'num': 34, 'atr%': atr_pct}
+            return {'signal': 'BUY', 'confidence': 30, 'method': 'ATR Low Volatility', 'num': 34, 'atr%': atr_pct}
         else:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'ATR Normal', 'num': 34, 'atr%': atr_pct}
 
     def analyze_bollinger_b(self, symbol, interval='1h', limit=100):
-        """Method 35: Bollinger %B"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
-            return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Bollinger %B', 'num': 35}
+            return {'signal': 'NEUTRAL', 'confidence': 0, 'method': '%B', 'num': 35}
         b = self._calc_bollinger_b(cl, 20, 2)
         if b[-1] < 0:
-            return {'signal': 'BUY', 'confidence': 72, 'method': '%B Below 0 (Oversold)', 'num': 35, 'b': b[-1]}
+            return {'signal': 'BUY', 'confidence': 72, 'method': '%B Below 0', 'num': 35, 'b': b[-1]}
         elif b[-1] > 1:
-            return {'signal': 'SELL', 'confidence': 72, 'method': '%B Above 1 (Overbought)', 'num': 35, 'b': b[-1]}
+            return {'signal': 'SELL', 'confidence': 72, 'method': '%B Above 1', 'num': 35, 'b': b[-1]}
         elif b[-1] < 0.2:
             return {'signal': 'BUY', 'confidence': 40, 'method': '%B Near Oversold', 'num': 35}
         elif b[-1] > 0.8:
@@ -1734,7 +1640,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': '%B Neutral', 'num': 35}
 
     def analyze_bbw(self, symbol, interval='1h', limit=100):
-        """Method 36: BBW"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'BBW', 'num': 36}
@@ -1755,14 +1660,13 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'BBW Normal', 'num': 36}
 
     def analyze_chaikin_volatility(self, symbol, interval='1h', limit=100):
-        """Method 37: Chaikin Volatility"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
-            return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Chaikin Volatility', 'num': 37}
+            return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Chaikin Vol', 'num': 37}
         cv = self._calc_chaikin_volatility(hi, lo, 10, 10)
         valid_cv = [c for c in cv if c != 0]
         if len(valid_cv) < 2:
-            return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'Chaikin Volatility', 'num': 37}
+            return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'Chaikin Vol', 'num': 37}
         if cv[-1] > 0 and cv[-1] > cv[-2]:
             return {'signal': 'BUY', 'confidence': 30, 'method': 'Chaikin Vol Expanding', 'num': 37}
         elif cv[-1] < 0 and cv[-1] < cv[-2]:
@@ -1771,7 +1675,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'Chaikin Vol Stable', 'num': 37}
 
     def analyze_standard_error_bands(self, symbol, interval='1h', limit=100):
-        """Method 38: Standard Error Bands"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'SE Bands', 'num': 38}
@@ -1785,7 +1688,6 @@ class BinanceAnalyzer:
         return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'SE Bands Neutral', 'num': 38}
 
     def analyze_squeeze_momentum(self, symbol, interval='1h', limit=100):
-        """Method 39: Squeeze Momentum (LazyBear)"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Squeeze Momentum', 'num': 39}
@@ -1803,10 +1705,9 @@ class BinanceAnalyzer:
         else:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'Squeeze Neutral', 'num': 39}
 
-    # ==================== 🟠 SUPPORT/RESISTANCE & STRUCTURE (40-46) ====================
+    # ==================== S/R & STRUCTURE (40-46) ====================
 
     def analyze_pivot_points(self, symbol, interval='1d', limit=2):
-        """Method 40: Pivot Points"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Pivot Points', 'num': 40}
@@ -1822,7 +1723,6 @@ class BinanceAnalyzer:
             return {'signal': 'SELL', 'confidence': 20, 'method': 'Pivot Above PP', 'num': 40}
 
     def analyze_fib_retracement(self, symbol, interval='4h', limit=50):
-        """Method 41: Fibonacci Retracement"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Fib Retracement', 'num': 41}
@@ -1846,7 +1746,6 @@ class BinanceAnalyzer:
         return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'Fib Neutral', 'num': 41}
 
     def analyze_fib_extension(self, symbol, interval='4h', limit=50):
-        """Method 42: Fibonacci Extension"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Fib Extension', 'num': 42}
@@ -1861,7 +1760,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 15, 'method': 'Fib Extension Neutral', 'num': 42}
 
     def analyze_order_block(self, symbol, interval='1h', limit=100):
-        """Method 43: Order Block Detector"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Order Block', 'num': 43}
@@ -1882,7 +1780,6 @@ class BinanceAnalyzer:
         return {'signal': 'NEUTRAL', 'confidence': 15, 'method': 'Order Block Neutral', 'num': 43}
 
     def analyze_fvg(self, symbol, interval='1h', limit=100):
-        """Method 44: Fair Value Gap"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'FVG', 'num': 44}
@@ -1900,7 +1797,6 @@ class BinanceAnalyzer:
         return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'FVG None', 'num': 44}
 
     def analyze_supply_demand(self, symbol, interval='1h', limit=100):
-        """Method 45: Supply & Demand Zones"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Supply & Demand', 'num': 45}
@@ -1927,7 +1823,6 @@ class BinanceAnalyzer:
         return {'signal': 'NEUTRAL', 'confidence': 15, 'method': 'Supply/Demand Neutral', 'num': 45}
 
     def analyze_trendline(self, symbol, interval='1h', limit=50):
-        """Method 46: Trendline Drawing"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Trendline', 'num': 46}
@@ -1955,10 +1850,9 @@ class BinanceAnalyzer:
                 return {'signal': 'SELL', 'confidence': 55, 'method': 'Uptrend Resistance Reject', 'num': 46}
         return {'signal': 'NEUTRAL', 'confidence': 15, 'method': 'Trendline Neutral', 'num': 46}
 
-    # ==================== 🔴 ADVANCED & COMMUNITY (47-50) ====================
+    # ==================== ADVANCED (47-50) ====================
 
     def analyze_lorentzian_ml(self, symbol, interval='1h', limit=100):
-        """Method 47: Lorentzian Classification (ML-inspired)"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Lorentzian ML', 'num': 47}
@@ -1989,7 +1883,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 10, 'method': 'Lorentzian ML Neutral', 'num': 47}
 
     def analyze_luxalgo(self, symbol, interval='1h', limit=100):
-        """Method 48: LuxAlgo Premium Suite (simulation)"""
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'LuxAlgo Suite', 'num': 48}
@@ -2022,14 +1915,13 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 15, 'method': 'LuxAlgo Neutral', 'num': 48}
 
     def analyze_chop_zone(self, symbol, interval='1h', limit=100):
-        """Method 49: Chop Zone / Choppiness Index"""
         import math
         op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, limit)
         if not cl:
             return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Chop Zone', 'num': 49}
         chop = self._calc_chop_index(hi, lo, cl, 14)
         if chop[-1] > 61.8:
-            return {'signal': 'NEUTRAL', 'confidence': 70, 'method': 'Chop Zone — Ranging', 'num': 49, 'chop': chop[-1]}
+            return {'signal': 'NEUTRAL', 'confidence': 70, 'method': 'Chop Zone Ranging', 'num': 49, 'chop': chop[-1]}
         elif chop[-1] < 38.2:
             ema8 = self._calc_ema(cl, 8)[-1]
             ema21 = self._calc_ema(cl, 21)[-1]
@@ -2042,7 +1934,6 @@ class BinanceAnalyzer:
             return {'signal': 'NEUTRAL', 'confidence': 25, 'method': 'Chop Zone Transition', 'num': 49, 'chop': chop[-1]}
 
     def analyze_mtf_ma(self, symbol, interval='15m', limit=200):
-        """Method 50: Multi-Timeframe MA (15m+1h+4h)"""
         results = []
         for tf, period in [('15m', 50), ('1h', 50), ('4h', 50)]:
             op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, tf, period)
@@ -2076,13 +1967,9 @@ class BinanceAnalyzer:
         else:
             return {'signal': 'NEUTRAL', 'confidence': 20, 'method': 'MTF MA No Confluence', 'num': 50}
 
-    # ╔══════════════════════════════════════════════════════════════════════════╗
-    # ║  🏆 FINAL COMPREHENSIVE SIGNAL — ALL 50 METHODS AGGREGATED             ║
-    # ╚══════════════════════════════════════════════════════════════════════════╝
+    # ==================== FINAL AGGREGATE + DISPLAY ====================
 
     def analyze_all_50(self, symbol, interval='1h'):
-        """Run ALL 50def analyze_all_50(self, symbol, interval='1h'):
-        """Run ALL 50 methods and return a single weighted final signal."""
         method_map = {
             1: self.analyze_ema_50_200, 2: self.analyze_sma_50_200,
             3: self.analyze_supertrend, 4: self.analyze_ichimoku,
@@ -2168,7 +2055,6 @@ class BinanceAnalyzer:
         if ticker:
             entry_price = ticker['last']
         
-        # Calculate TP/SL using ATR
         atr_val = 0
         try:
             _, hi, lo, cl, vol, _ = self._prepare_ohlcv(symbol, interval, 50)
@@ -2179,6 +2065,9 @@ class BinanceAnalyzer:
             atr_val = entry_price * 0.015
         
         if final_signal == 'BUY':
+            tp1 = entry_price + atr_val
+            tp2 = entry_price + atr_val * 1.5
+            tp3 = entry_price + atrif final_signal == 'BUY':
             tp1 = entry_price + atr_val
             tp2 = entry_price + atr_val * 1.5
             tp3 = entry_price + atr_val * 2.2
@@ -2229,151 +2118,4 @@ class BinanceAnalyzer:
         self._save_signals()
         
         return result_data
-
-    def get_top_10_combos_signal(self, symbol, interval='1h'):
-        """🎯 TOP 10 HIGHEST PROFIT FACTOR COMBOS"""
-        op, hi, lo, cl, vol, ts = self._prepare_ohlcv(symbol, interval, 200)
-        if not cl:
-            return {'signal': 'NEUTRAL', 'confidence': 0, 'method': 'Top 10 Combo'}
-        
-        combos = []
-        
-        # Combo 1: Volume Profile + Order Block + RSI Divergence
-        vp = self.analyze_volume_profile(symbol, interval)
-        ob = self.analyze_order_block(symbol, interval)
-        rsi = self.analyze_rsi(symbol, interval)
-        score = (1 if vp['signal']=='BUY' else -1 if vp['signal']=='SELL' else 0)*vp.get('confidence',0)/100
-        score += (1 if ob['signal']=='BUY' else -1 if ob['signal']=='SELL' else 0)*ob.get('confidence',0)/100
-        score += (1 if rsi['signal']=='BUY' else -1 if rsi['signal']=='SELL' else 0)*rsi.get('confidence',0)/100
-        combos.append({'name': 'VolProfile+OB+RSI', 'score': score})
-        
-        # Combo 2: SuperTrend + Squeeze Momentum + VWAP
-        st = self.analyze_supertrend(symbol, interval)
-        sq = self.analyze_squeeze_momentum(symbol, interval)
-        vw = self.analyze_anchored_vwap(symbol, interval)
-        score = (1 if st['signal']=='BUY' else -1 if st['signal']=='SELL' else 0)*st.get('confidence',0)/100
-        score += (1 if sq['signal']=='BUY' else -1 if sq['signal']=='SELL' else 0)*sq.get('confidence',0)/100
-        score += (1 if vw['signal']=='BUY' else -1 if vw['signal']=='SELL' else 0)*vw.get('confidence',0)/100
-        combos.append({'name': 'ST+Squeeze+VWAP', 'score': score})
-        
-        # Combo 3: Ichimoku + MFI + Anchored VWAP
-        ic = self.analyze_ichimoku(symbol, interval)
-        mf = self.analyze_mfi(symbol, interval)
-        score = (1 if ic['signal']=='BUY' else -1 if ic['signal']=='SELL' else 0)*ic.get('confidence',0)/100
-        score += (1 if mf['signal']=='BUY' else -1 if mf['signal']=='SELL' else 0)*mf.get('confidence',0)/100
-        score += (1 if vw['signal']=='BUY' else -1 if vw['signal']=='SELL' else 0)*vw.get('confidence',0)/100
-        combos.append({'name': 'Ichimoku+MFI+VWAP', 'score': score})
-        
-        # Combo 4: HMA + MACD + Volume Profile
-        hm = self.analyze_hma(symbol, interval)
-        mc = self.analyze_macd(symbol, interval)
-        score = (1 if hm['signal']=='BUY' else -1 if hm['signal']=='SELL' else 0)*hm.get('confidence',0)/100
-        score += (1 if mc['signal']=='BUY' else -1 if mc['signal']=='SELL' else 0)*mc.get('confidence',0)/100
-        score += (1 if vp['signal']=='BUY' else -1 if vp['signal']=='SELL' else 0)*vp.get('confidence',0)/100
-        combos.append({'name': 'HMA+MACD+VP', 'score': score})
-        
-        # Combo 5: Bollinger Squeeze + RSI + OBV
-        bb = self.analyze_bollinger_bands(symbol, interval)
-        obv = self.analyze_obv(symbol, interval)
-        score = (1 if bb['signal']=='BUY' else -1 if bb['signal']=='SELL' else 0)*bb.get('confidence',0)/100
-        score += (1 if rsi['signal']=='BUY' else -1 if rsi['signal']=='SELL' else 0)*rsi.get('confidence',0)/100
-        score += (1 if obv['signal']=='BUY' else -1 if obv['signal']=='SELL' else 0)*obv.get('confidence',0)/100
-        combos.append({'name': 'BB Squeeze+RSI+OBV', 'score': score})
-        
-        # Combo 6: EMA 50/200 + StochRSI + ATR
-        ema = self.analyze_ema_50_200(symbol, interval)
-        sk = self.analyze_stoch_rsi(symbol, interval)
-        score = (1 if ema['signal']=='BUY' else -1 if ema['signal']=='SELL' else 0)*ema.get('confidence',0)/100
-        score += (1 if sk['signal']=='BUY' else -1 if sk['signal']=='SELL' else 0)*sk.get('confidence',0)/100
-        combos.append({'name': 'EMA200+StochRSI+ATR', 'score': score})
-        
-        # Combo 7: Lorentzian + SuperTrend + FVG
-        lz = self.analyze_lorentzian_ml(symbol, interval)
-        fv = self.analyze_fvg(symbol, interval)
-        score = (1 if lz['signal']=='BUY' else -1 if lz['signal']=='SELL' else 0)*lz.get('confidence',0)/100
-        score += (1 if st['signal']=='BUY' else -1 if st['signal']=='SELL' else 0)*st.get('confidence',0)/100
-        score += (1 if fv['signal']=='BUY' else -1 if fv['signal']=='SELL' else 0)*fv.get('confidence',0)/100
-        combos.append({'name': 'Lorentzian+ST+FVG', 'score': score})
-        
-        # Combo 8: Pivot Points + Fib + Volume Profile
-        pp = self.analyze_pivot_points(symbol, '1d')
-        fb = self.analyze_fib_retracement(symbol, '4h')
-        score = (1 if pp['signal']=='BUY' else -1 if pp['signal']=='SELL' else 0)*pp.get('confidence',0)/100
-        score += (1 if fb['signal']=='BUY' else -1 if fb['signal']=='SELL' else 0)*fb.get('confidence',0)/100
-        score += (1 if vp['signal']=='BUY' else -1 if vp['signal']=='SELL' else 0)*vp.get('confidence',0)/100
-        combos.append({'name': 'Pivot+Fib+VP', 'score': score})
-        
-        # Combo 9: Heikin Ashi + EMA 20/50 + CMF
-        ha = self.analyze_heikin_ashi(symbol, interval)
-        cm = self.analyze_cmf(symbol, interval)
-        ema20 = self._calc_ema(cl, 20)[-1] if cl else 0
-        ema50 = self._calc_ema(cl, 50)[-1] if cl else 0
-        ema_sig = 'BUY' if ema20 > ema50 else 'SELL'
-        score = (1 if ha['signal']=='BUY' else -1 if ha['signal']=='SELL' else 0)*ha.get('confidence',0)/100
-        score += (1 if ema_sig == 'BUY' else -1) * 0.5
-        score += (1 if cm['signal']=='BUY' else -1 if cm['signal']=='SELL' else 0)*cm.get('confidence',0)/100
-        combos.append({'name': 'HA+EMA20/50+CMF', 'score': score})
-        
-        # Combo 10: Donchian Breakout + ATR + MFI
-        dc = self.analyze_donchian(symbol, interval)
-        score = (1 if dc['signal']=='BUY' else -1 if dc['signal']=='SELL' else 0)*dc.get('confidence',0)/100
-        score += (1 if mf['signal']=='BUY' else -1 if mf['signal']=='SELL' else 0)*mf.get('confidence',0)/100
-        combos.append({'name': 'Donchian+ATR+MFI', 'score': score})
-        
-        avg_combo = sum(c['score'] for c in combos) / len(combos) if combos else 0
-        best_combo = max(combos, key=lambda c: abs(c['score'])) if combos else {'name': 'N/A', 'score': 0}
-        
-        if avg_combo > 0.5:
-            sig = 'BUY'; conf = min(avg_combo * 60 + 30, 90)
-        elif avg_combo < -0.5:
-            sig = 'SELL'; conf = min(abs(avg_combo) * 60 + 30, 90)
-        elif avg_combo > 0.2:
-            sig = 'BUY'; conf = 40
-        elif avg_combo < -0.2:
-            sig = 'SELL'; conf = 40
-        else:
-            sig = 'NEUTRAL'; conf = 20
-        
-        return {
-            'signal': sig, 'confidence': round(conf, 1),
-            'method': f'Top 10 Combos (Best: {best_combo["name"]})',
-            'best_combo': best_combo, 'all_combos': combos,
-            'avg_combo_score': round(avg_combo, 3)
-        }
-
-    def display_final_signal(self, symbol, interval='1h'):
-        """Display formatted final signal from ALL 50 methods"""
-        result = self.analyze_all_50(symbol, interval)
-        combo = self.get_top_10_combos_signal(symbol, interval)
-        
-        if result['signal'] == 'NEUTRAL' and result['confidence'] < 30:
-            if combo['signal'] != 'NEUTRAL':
-                result['signal'] = combo['signal']
-                result['confidence'] = max(result['confidence'], combo['confidence'])
-                result['method'] = f"50-Method Tiebreak -> {combo['best_combo']['name']}"
-        
-        lines = [
-            f"\n{'='*60}",
-            f"  🏆 FINAL SIGNAL — {symbol} ({interval})",
-            f"{'='*60}",
-            f"  Signal:     {result['signal']}",
-            f"  Confidence: {result['confidence']:.1f}%",
-            f"  Entry:      ${result['entry']:.8f}",
-            f"  TP1:        ${result['tp1']:.8f}",
-            f"  TP2:        ${result['tp2']:.8f}",
-            f"  TP3:        ${result['tp3']:.8f}",
-            f"  SL:         ${result['sl']:.8f}",
-            f"  Win% Est:   {result['win_percentage']:.1f}%",
-            f"{'-'*60}",
-            f"  📊 50-Method Vote: {result['summary']['buy']} Buy / {result['summary']['sell']} Sell / {result['summary']['neutral']} Neutral",
-            f"  📈 Bias Score: {result['summary']['bias']:.3f}",
-            f"  🎯 Best Combo: {combo.get('best_combo', {}).get('name', 'N/A')}",
-            f"{'-'*60}",
-            f"  🔥 Top Agreeing Methods:"
-        ]
-        for i, tm in enumerate(result.get('top_methods', [])[:5], 1):
-            lines.append(f"     {i}. {tm['method']} ({tm['confidence']}%)")
-        lines.append(f"{'='*60}")
-        print('\n'.join(lines))
-        return result
-        
+            
