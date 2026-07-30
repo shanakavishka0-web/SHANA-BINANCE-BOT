@@ -2067,7 +2067,7 @@ class BinanceAnalyzer:
         if final_signal == 'BUY':
             tp1 = entry_price + atr_val
             tp2 = entry_price + atr_val * 1.5
-            tp3 = entry_price + atrif final_signal == 'BUY':
+            tp3 = entry_price + (atrif * final_signal == 'BUY')
             tp1 = entry_price + atr_val
             tp2 = entry_price + atr_val * 1.5
             tp3 = entry_price + atr_val * 2.2
