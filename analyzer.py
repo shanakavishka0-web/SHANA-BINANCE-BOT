@@ -324,6 +324,15 @@ def _sl_now():
                     hit = (signal == 'BUY' and current <= sl * 0.9995) or \
                           (signal == 'SELL' and current >= sl * 1 )
                            def check_signal_results(self):
+        """
+        Check active signals and update their status.
+        """
+        try:
+            for key, sig in list(self.signal_tracker.items()):
+                # Add checking logic here
+                pass
+        except Exception as e:
+            print(f"Error checking signals: {e}")
         """🔍 Live price check → TP1 WIN / TP2 WIN / SL LOST messages"""
         self._ensure_batch_state()
         updates = []
