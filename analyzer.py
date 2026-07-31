@@ -323,7 +323,7 @@ def _sl_now():
                 if not item['sl_msg_sent']:
                     hit = (signal == 'BUY' and current <= sl * 0.9995) or \
                           (signal == 'SELL' and current >= sl * 1 )
-                           def check_signal_results(self):
+                         def check_signal_results(self):
         """
         Check active signals and update their status.
         """
