@@ -32,8 +32,8 @@ class BinanceAnalyzer:
         self.api_key = api_key or os.getenv("BINANCE_API_KEY", "")
         self.secret = secret or os.getenv("BINANCE_SECRET_KEY", "")
         self.session = requests.Session()
-        # ── full state init — main.py එකට ඕන හැම attribute එකම මෙතන ✅ ──
-        self.signal_tracker = {}          # main.py line 1141 මේක use කරනවා
+        # ── full state init — main.py එකට ඕන හැම attribute එකම ✅ ──
+        self.signal_tracker = {}
         self.signal_queue = list(COINS)
         self.active_batch = []
         self.batch_results = []
@@ -160,6 +160,30 @@ class BinanceAnalyzer:
             trs.append(max(h - l, abs(h - pc), abs(l - pc)))
         return sum(trs[-period:]) / period
 
+    def _signal_dict(self, coin, signal, entry, tp1, tp2, sl, rsi):
+        """📦 Signal dict හදනවා — main.py එකට ඕන හැම key එකක්ම
+        ('confidence' + 'message' ඇතුළුව) මේකේ තියෙනවා ✅"""
+        confidence = round(min(99.0, abs(50.0 - rsi) * 2.0), 1)
+        sig = {
+            "coin": coin,
+            "signal": signal,
+            "entry": entry,
+            "tp1": tp1,
+            "tp2": tp2,
+            "sl": sl,
+            "rsi": round(rsi, 2),
+            "confidence": confidence,
+            "status": "ACTIVE",
+            "win_pct": 0.0,
+            "tp1_msg_sent": False,
+            "tp2_msg_sent": False,
+            "sl_msg_sent": False,
+            "created_at": str(self._sl_now()),
+            "message": "",
+        }
+        sig["message"] = self.build_signal_message(sig)
+        return sig
+
     def _generate_signal(self, coin):
         """🎯 1h RSI + ATR → BUY/SELL signal + TP1/TP2/SL"""
         candles = self._get_klines(coin, interval="1h", limit=60)
@@ -184,20 +208,7 @@ class BinanceAnalyzer:
         else:
             return None  # RSI neutral — signal නැහැ
 
-        return {
-            "coin": coin,
-            "signal": signal,
-            "entry": entry,
-            "tp1": tp1,
-            "tp2": tp2,
-            "sl": sl,
-            "status": "ACTIVE",
-            "win_pct": 0.0,
-            "tp1_msg_sent": False,
-            "tp2_msg_sent": False,
-            "sl_msg_sent": False,
-            "created_at": str(self._sl_now()),
-        }
+        return self._signal_dict(coin, signal, entry, tp1, tp2, sl, rsi)
 
     # ============================================================
     # 🧮 BATCH STATE
@@ -222,12 +233,12 @@ class BinanceAnalyzer:
             coins.append(self.signal_queue.pop(0))
         self.active_batch = coins
         self.batch_results = []
-        self.signal_tracker = {}             # batch එකට අලුත් tracker එක
+        self.signal_tracker = {}
         for coin in coins:
             sig = self._generate_signal(coin)
             if sig:
                 self.batch_results.append(sig)
-                self.signal_tracker[coin] = sig   # ✅ main.py tracker එකට
+                self.signal_tracker[coin] = sig
         if self.completed_batches:
             self.batch_number = self.completed_batches[-1]["batch_number"] + 1
         else:
@@ -276,6 +287,42 @@ class BinanceAnalyzer:
     # ============================================================
     # 📊 MESSAGE BUILDERS
     # ============================================================
+
+    def build_signal_message(self, item):
+        """📨 Signal message — main.py එකේ sig['message'] send කරනවා නම් මේක"""
+        sl_time = self._sl_now()
+        lines = [
+            f"📨 *SHANA SIGNAL* 📨",
+            f"━━━━━━━━━━━━━━━━━━",
+            f"🪙 Coin: `{item['coin']}`",
+            f"📈 Signal: `{item['signal']}`",
+            f"💵 Entry: `{self._fmt_price(item['entry'])}`",
+            f"🎯 TP1: `{self._fmt_price(item['tp1'])}`",
+            f"🎯 TP2: `{self._fmt_price(item['tp2'])}`",
+            f"🛑 SL: `{self._fmt_price(item['sl'])}`",
+            f"📊 RSI: `{item.get('rsi', '')}` | Confidence: `{item.get('confidence', '')}%`",
+            f"━━━━━━━━━━━━━━━━━━",
+            f"🇱🇰 {sl_time.strftime('%Y-%m-%d %H:%M:%S')}",
+        ]
+        return "\n".join(lines)
+
+    def build_power_buy_message(self, item):
+        """⚡ POWER BUY message"""
+        sl_time = self._sl_now()
+        lines = [
+            f"⚡ *SHANA POWER BUY* ⚡",
+            f"━━━━━━━━━━━━━━━━━━",
+            f"🪙 Coin: `{item['coin']}`",
+            f"📈 Signal: `{item['signal']}`",
+            f"💵 Entry: `{self._fmt_price(item['entry'])}`",
+            f"🎯 TP1: `{self._fmt_price(item['tp1'])}`",
+            f"🎯 TP2: `{self._fmt_price(item['tp2'])}`",
+            f"🛑 SL: `{self._fmt_price(item['sl'])}`",
+            f"📊 RSI: `{item.get('rsi', '')}` | Confidence: `{item.get('confidence', '')}%`",
+            f"━━━━━━━━━━━━━━━━━━",
+            f"🇱🇰 {sl_time.strftime('%Y-%m-%d %H:%M:%S')}",
+        ]
+        return "\n".join(lines)
 
     def build_win_message(self, item, level=1):
         """🎯 WIN message — Telegram format"""
@@ -379,13 +426,16 @@ class BinanceAnalyzer:
         return updates
 
     # ============================================================
-    # ➕ NEW — main.py loop එකට ඕන methods 4
+    # ➕ main.py loop එකට ඕන methods
     # ============================================================
 
     def update_active_signals(self):
-        """🔁 main.py loop එකෙන් call වෙනවා — live check කරලා
-        ACTIVE signal count එක (int) return කරනවා"""
+        """🔁 main.py loop එකෙන් call වෙනවා — batch එකක් නැත්නම්
+        auto-generate කරලා, live check කරලා ACTIVE count එක (int) දෙනවා"""
         self._ensure_batch_state()
+        if not self.batch_results:
+            logger.info("No batch yet — generating first batch...")
+            self.get_next_batch(10)
         try:
             self.check_signal_results()
         except Exception as e:
@@ -395,8 +445,8 @@ class BinanceAnalyzer:
         return active
 
     def check_power_buy_shana(self, coins=None):
-        """⚡ POWER BUY — RSI < 25 වුන coins වල signal dict list එකක්
-        return කරනවා (main.py එකේ loop එකට iterable එකක් ඕන)"""
+        """⚡ POWER BUY — RSI < 25 වුන coins වල signal list එකක්
+        return කරනවා (සෑම signal එකකම 'message' + 'confidence' තියෙනවා ✅)"""
         self._ensure_batch_state()
         coins = coins or COINS
         results = []
@@ -409,13 +459,9 @@ class BinanceAnalyzer:
                 if rsi < 25:
                     atr = self._atr(candles)
                     entry = candles[-1]["close"]
-                    sig = {
-                        "coin": coin, "signal": "BUY", "entry": entry,
-                        "tp1": entry + atr, "tp2": entry + 2 * atr, "sl": entry - atr,
-                        "rsi": round(rsi, 2), "status": "ACTIVE", "win_pct": 0.0,
-                        "tp1_msg_sent": False, "tp2_msg_sent": False, "sl_msg_sent": False,
-                        "created_at": str(self._sl_now()),
-                    }
+                    sig = self._signal_dict(coin, "BUY", entry,
+                                            entry + atr, entry + 2 * atr, entry - atr, rsi)
+                    sig["message"] = self.build_power_buy_message(sig)
                     results.append(sig)
                     self.signal_tracker[coin] = sig
             except Exception as e:
