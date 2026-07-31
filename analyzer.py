@@ -41,20 +41,7 @@ class BinanceAnalyzer:
         self.completed_batches = []
 
     def __getattr__(self, name):
-        """🔧 Safety net — main.py එකෙන් තව මොන attribute/method එකක් හැරුණත්
-        crash වෙනවා වෙනුවට safe default එකක් දෙනවා."""
-        defaults = {
-            "signal_tracker": {},
-            "signal_queue": list(COINS),
-            "active_batch": [],
-            "batch_results": [],
-            "completed_batches": [],
-            "batch_number": 1,
-        }
-        if name in defaults:
-            val = defaults[name]
-            setattr(self, name, val)
-            return val
+        """🔧 Safety net — තව මොන method එකක් හැරුණත් crash නොවී warn කරලා continue"""
         logger.warning(f"BinanceAnalyzer.{name} not found — returning no-op")
         def _noop(*args, **kwargs):
             return None
@@ -384,12 +371,81 @@ class BinanceAnalyzer:
                         pct = min(100.0, abs(float(item["entry"]) - current) / dist * 100) if dist > 0 else 0.0
                     item["win_pct"] = round(pct, 1)
 
-                # ✅ tracker එකත් sync — main.py status check වලට
+                # ✅ tracker sync
                 self.signal_tracker[item["coin"]] = item
             except Exception as e:
                 logger.warning(f"check_signal_results error {item['coin']}: {e}")
                 continue
         return updates
+
+    # ============================================================
+    # ➕ NEW — main.py loop එකට ඕන methods 4
+    # ============================================================
+
+    def update_active_signals(self):
+        """🔁 main.py loop එකෙන් call වෙනවා — live check කරලා
+        ACTIVE signal count එක (int) return කරනවා"""
+        self._ensure_batch_state()
+        try:
+            self.check_signal_results()
+        except Exception as e:
+            logger.warning(f"update_active_signals error: {e}")
+        active = sum(1 for it in self.batch_results if it.get("status") == "ACTIVE")
+        logger.info(f"🔄 Active signals: {active}/{len(self.batch_results)}")
+        return active
+
+    def check_power_buy_shana(self, coins=None):
+        """⚡ POWER BUY — RSI < 25 වුන coins වල signal dict list එකක්
+        return කරනවා (main.py එකේ loop එකට iterable එකක් ඕන)"""
+        self._ensure_batch_state()
+        coins = coins or COINS
+        results = []
+        for coin in coins:
+            try:
+                candles = self._get_klines(coin, interval="1h", limit=60)
+                if len(candles) < 20:
+                    continue
+                rsi = self._rsi(candles)
+                if rsi < 25:
+                    atr = self._atr(candles)
+                    entry = candles[-1]["close"]
+                    sig = {
+                        "coin": coin, "signal": "BUY", "entry": entry,
+                        "tp1": entry + atr, "tp2": entry + 2 * atr, "sl": entry - atr,
+                        "rsi": round(rsi, 2), "status": "ACTIVE", "win_pct": 0.0,
+                        "tp1_msg_sent": False, "tp2_msg_sent": False, "sl_msg_sent": False,
+                        "created_at": str(self._sl_now()),
+                    }
+                    results.append(sig)
+                    self.signal_tracker[coin] = sig
+            except Exception as e:
+                logger.warning(f"check_power_buy_shana error {coin}: {e}")
+        logger.info(f"⚡ Power buy signals: {len(results)}")
+        return results
+
+    def find_long_signal(self, coin=None):
+        """📈 Long (BUY) signal එකක් හොයනවා — dict එකක් හෝ None"""
+        coins = [coin] if coin else COINS
+        for c in coins:
+            try:
+                sig = self._generate_signal(c)
+                if sig and sig["signal"] == "BUY":
+                    return sig
+            except Exception as e:
+                logger.warning(f"find_long_signal error {c}: {e}")
+        return None
+
+    def find_short_signal(self, coin=None):
+        """📉 Short (SELL) signal එකක් හොයනවා — dict එකක් හෝ None"""
+        coins = [coin] if coin else COINS
+        for c in coins:
+            try:
+                sig = self._generate_signal(c)
+                if sig and sig["signal"] == "SELL":
+                    return sig
+            except Exception as e:
+                logger.warning(f"find_short_signal error {c}: {e}")
+        return None
 
     # ============================================================
     # 📦 BATCH SUMMARY / ROTATION
@@ -442,3 +498,5 @@ if __name__ == "__main__":
     a = BinanceAnalyzer()
     print("Connection:", a.check_binance_connection())
     print("Batch:", a.get_next_batch(10))
+    print("Active:", a.update_active_signals())
+    print("Power buy:", a.check_power_buy_shana())
