@@ -2,15 +2,14 @@
     # 💀 SHANA BATCH ENGINE v2 — 10 COIN ROTATION | 1h ONLY | LIVE WIN/LOST
     # ============================================================
 
-    @staticmethod
-    def _sl_now():
-        """🇱🇰 Sri Lanka current date & time — 100% accurate (Asia/Colombo)"""
-        try:
-            from zoneinfo import ZoneInfo
-            return datetime.now(ZoneInfo("Asia/Colombo"))
-        except Exception:
-            return datetime.now() + timedelta(hours=5, minutes=30)
-
+@staticmethod
+def _sl_now():
+    """Lk Sri Lanka current date & time - 100% accurate (Asia/Colombo)"""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Colombo"))
+    except Exception:
+        return datetime.now() + timedelta(hours=5, minutes=30)
     def _fmt_price(self, price):
         try:
             price = float(price)
