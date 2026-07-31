@@ -2118,17 +2118,155 @@ class BinanceAnalyzer:
         self._save_signals()
         
         return result_data
-        # ============ COMPATIBILITY METHODS (main.py එකට ඕනේ 3 methods) ============
+      # ============ FIX 1: Signal keys normalize කරන helper (tp1 -> take_profit_1) ============
+    def _normalize_signal_dict(self, result):
+        """
+        tp1/tp2/sl keys තියෙන signal dict එකකට
+        take_profit_1/take_profit_2/stop_loss keys දෙකම add කරනවා.
+        main.py දෙකම use කරන නිසා.
+        """
+        if not result or not isinstance(result, dict):
+            return result
+        result.setdefault('signal', 'NEUTRAL')
+        result.setdefault('entry', 0)
+        result.setdefault('tp1', result.get('take_profit_1', 0))
+        result.setdefault('tp2', result.get('take_profit_2', 0))
+        result.setdefault('tp3', result.get('take_profit_3', 0))
+        result.setdefault('sl', result.get('stop_loss', 0))
+        result['take_profit_1'] = result.get('tp1', 0)
+        result['take_profit_2'] = result.get('tp2', 0)
+        result['take_profit_3'] = result.get('tp3', 0)
+        result['stop_loss'] = result.get('sl', 0)
+        result.setdefault('confidence', 0)
+        result.setdefault('rsi', 50)
+        result.setdefault('volume_ratio', 1.0)
+        result.setdefault('adx', 20)
+        result.setdefault('mfi', 50)
+        result.setdefault('bb_percent', 50)
+        result.setdefault('strict_filters', 0)
+        result.setdefault('reasons', [m.get('method', '') for m in result.get('top_methods', [])])
+        result.setdefault('timestamp', str(datetime.now()))
+        return result
 
+    # ============ FIX 2: 50-method aggregate method එක හොයලා run කරන helper ============
+    def _run_any_analysis(self, symbol, interval='5m'):
+        """
+        ඔයාගේ aggregate method එක (නම කුමක් වුනත්) හොයලා run කරනවා.
+        Method එක හම්බුනා නම් ඒකේ result එක return කරනවා.
+        """
+        aggregate_names = [
+            'analyze', 'get_signal', 'analyze_aggregate', 'aggregate_analysis',
+            'full_analysis', 'analyze_symbol', 'analyze_coin', 'analyze_all',
+            'run_full_analysis', 'get_aggregate_signal', 'check_signal'
+        ]
+        for name in aggregate_names:
+            method = getattr(self, name, None)
+            if method is None:
+                continue
+            try:
+                result = method(symbol, interval)
+            except TypeError:
+                try:
+                    result = method(symbol)
+                except Exception as e:
+                    logger.warning(f"{name}({symbol}) failed: {e}")
+                    result = None
+            except Exception as e:
+                logger.warning(f"{name}({symbol}) failed: {e}")
+                result = None
+            if result:
+                return result
+            break  # Method එක හම්බුනා — result නැත්නම් fallback එකට යන්න
+        return None
+
+    # ============ FIX 3: find_short_signal — REPLACE (normalize කරලා දෙනවා) ============
+    def find_short_signal(self, symbol, interval='5m'):
+        """
+        main.py call කරනවා — SELL signal එක හොයනවා.
+        දැන් take_profit_1/stop_loss keys එක්ක return වෙනවා.
+        """
+        result = self._run_any_analysis(symbol, interval)
+        if result is None:
+            result = self._quick_short_analysis(symbol, interval)
+        result = self._normalize_signal_dict(result)
+        if result and result.get('signal') == 'SELL':
+            key = f"{symbol}_SELL_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            if key not in self.signal_tracker:
+                self.signal_tracker[key] = result
+                self._save_signals()
+            return result
+        return None
+
+    # ============ FIX 4: find_long_signal — NEW (BUY signals) ============
+    def find_long_signal(self, symbol, interval='5m'):
+        """
+        main.py call කරනවා — BUY signal එක හොයනවා.
+        මේක නැති නිසා තමයි 'no attribute' error එක ආවේ.
+        """
+        result = self._run_any_analysis(symbol, interval)
+        if result is None:
+            result = self._quick_short_analysis(symbol, interval)
+        result = self._normalize_signal_dict(result)
+        if result and result.get('signal') == 'BUY':
+            key = f"{symbol}_BUY_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            if key not in self.signal_tracker:
+                self.signal_tracker[key] = result
+                self._save_signals()
+            return result
+        return None
+
+    # ============ FIX 5: check_power_buy_shana — REPLACE ('message' key එක add කරලා) ============
+    def check_power_buy_shana(self, *args, **kwargs):
+        """
+        main.py call කරනවා — strong BUY signals list එක.
+        හැම result එකකටම 'message' key එක add කරනවා
+        (main.py ඒකෙන් තමයි Telegram message send කරන්නේ).
+        """
+        results = []
+        for coin in COINS:
+            try:
+                result = self._run_any_analysis(coin, '5m')
+                if result is None:
+                    result = self._quick_short_analysis(coin, '5m')
+                result = self._normalize_signal_dict(result)
+                if result and result.get('signal') == 'BUY' and result.get('confidence', 0) >= 55:
+                    # main.py එකට ඕනේ 'message' key එක pre-build කරනවා
+                    result['message'] = (
+                        f"🟢 *POWER BUY SIGNAL* 🟢\n\n"
+                        f"📈 *{result['symbol']}*\n"
+                        f"💰 Entry: `{result['entry']}`\n"
+                        f"🎯 TP1: `{result['take_profit_1']}`\n"
+                        f"🎯 TP2: `{result['take_profit_2']}`\n"
+                        f"🛑 SL: `{result['stop_loss']}`\n"
+                        f"⚡ Confidence: `{result['confidence']}%`\n"
+                        f"📌 {', '.join(result['reasons'][:3])}\n\n"
+                        f"⏰ {result['timestamp']}"
+                    )
+                    results.append(result)
+            except Exception as e:
+                logger.warning(f"check_power_buy_shana error {coin}: {e}")
+                continue
+        results.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+        return results
+
+    # ============ FIX 6: update_active_signals — REPLACE (tracker entries normalize කරලා) ============
     def update_active_signals(self, *args, **kwargs):
         """
-        main.py call කරනවා — signal_tracker එකේ තියෙන signals වල
-        live win% + status (WIN/LOST/ACTIVE) update කරන්න.
+        main.py call කරනවා — tracked signals වල live win% + status update කරනවා.
+        හැම entry එකකටම take_profit_1/stop_loss keys add කරනවා.
         """
         updated = 0
         now = datetime.now()
         for key, sig in list(self.signal_tracker.items()):
             try:
+                # tracker entries වලටත් take_profit_1/stop_loss keys add කරනවා
+                sig.setdefault('take_profit_1', sig.get('tp1', 0))
+                sig.setdefault('take_profit_2', sig.get('tp2', 0))
+                sig.setdefault('take_profit_3', sig.get('tp3', 0))
+                sig.setdefault('stop_loss', sig.get('sl', 0))
+                sig.setdefault('status', 'ACTIVE')
+                sig.setdefault('win_percentage', 0.0)
+
                 symbol = sig.get('symbol', '')
                 if not symbol:
                     continue
@@ -2137,13 +2275,12 @@ class BinanceAnalyzer:
                     continue
                 current = ticker['last']
                 entry = sig.get('entry', 0) or 0
-                tp1 = sig.get('tp1', 0) or 0
-                sl = sig.get('sl', 0) or 0
+                tp1 = sig.get('take_profit_1', 0) or 0
+                sl = sig.get('stop_loss', 0) or 0
                 signal = sig.get('signal', 'NEUTRAL')
 
                 sig['current_price'] = current
                 sig['last_updated'] = now.isoformat()
-                sig['status'] = sig.get('status', 'ACTIVE')
 
                 if signal == 'SELL':
                     # SHORT: price පහළට ගියොත් win
@@ -2188,261 +2325,3 @@ class BinanceAnalyzer:
         if updated > 0:
             self._save_signals()
         return updated
-
-    # ---------- Plain-Python indicator helpers (pandas නැතුව) ----------
-
-    def _calc_ema(self, values, period):
-        if not values:
-            return []
-        k = 2.0 / (period + 1)
-        ema = [values[0]]
-        for v in values[1:]:
-            ema.append(v * k + ema[-1] * (1 - k))
-        return ema
-
-    def _calc_rsi(self, closes, period=14):
-        if len(closes) < period + 1:
-            return 50.0
-        gains, losses = [], []
-        for i in range(1, len(closes)):
-            diff = closes[i] - closes[i - 1]
-            gains.append(max(diff, 0.0))
-            losses.append(max(-diff, 0.0))
-        avg_gain = sum(gains[:period]) / period
-        avg_loss = sum(losses[:period]) / period
-        if avg_loss == 0:
-            return 100.0
-        return 100.0 - (100.0 / (1.0 + avg_gain / avg_loss))
-
-    def _load_ohlcv(self, symbol, interval, limit=100):
-        """OHLCV lists ගන්න — මුලින් _prepare_ohlcv, නැත්නම් get_klines"""
-        try:
-            result = self._prepare_ohlcv(symbol, interval, limit)
-            if result and len(result) >= 5 and result[3]:
-                return {
-                    'high': [float(x) for x in result[1]],
-                    'low': [float(x) for x in result[2]],
-                    'close': [float(x) for x in result[3]],
-                    'volume': [float(x) for x in result[4]],
-                }
-        except Exception as e:
-            logger.warning(f"_prepare_ohlcv failed {symbol}: {e}")
-
-        try:
-            data = self.get_klines(symbol, interval, limit)
-            if data:
-                highs, lows, closes, vols = [], [], [], []
-                for k in data:
-                    try:
-                        highs.append(float(k[2]))
-                        lows.append(float(k[3]))
-                        closes.append(float(k[4]))
-                        vols.append(float(k[5]))
-                    except (TypeError, ValueError, IndexError):
-                        continue
-                if len(closes) >= 30:
-                    return {'high': highs, 'low': lows, 'close': closes, 'volume': vols}
-        except Exception as e:
-            logger.warning(f"get_klines fallback failed {symbol}: {e}")
-        return None
-
-    def _quick_short_analysis(self, symbol, interval='5m'):
-        """
-        Fallback analysis — find_short_signal / check_power_buy_shana සඳහා.
-        RSI / EMA / MACD / BB / Volume අනුව BUY/SELL/NEUTRAL දෙනවා.
-        """
-        try:
-            ohlcv = self._load_ohlcv(symbol, interval, 100)
-            if not ohlcv:
-                return None
-            closes = ohlcv['close']
-            highs = ohlcv['high']
-            lows = ohlcv['low']
-            volumes = ohlcv['volume']
-            if len(closes) < 50:
-                return None
-
-            ticker = self.get_ticker(symbol)
-            if not ticker:
-                return None
-            entry = ticker['last']
-
-            rsi = self._calc_rsi(closes, 14)
-            ema12 = self._calc_ema(closes, 12)[-1]
-            ema26 = self._calc_ema(closes, 26)[-1]
-            macd_line = [a - b for a, b in zip(self._calc_ema(closes, 12), self._calc_ema(closes, 26))]
-            signal_line = self._calc_ema(macd_line, 9)[-1]
-            macd_now = macd_line[-1]
-
-            window = closes[-20:]
-            mean = sum(window) / len(window)
-            variance = sum((x - mean) ** 2 for x in window) / len(window)
-            std = variance ** 0.5
-            bb_upper = mean + 2 * std
-            bb_lower = mean - 2 * std
-
-            sell_score = 0.0
-            buy_score = 0.0
-            reasons = []
-
-            if rsi > 70:
-                sell_score += 2.0
-                reasons.append(f"RSI {rsi:.0f}")
-            elif rsi < 30:
-                buy_score += 2.0
-                reasons.append(f"RSI {rsi:.0f}")
-
-            if closes[-1] < ema12 and macd_now < signal_line:
-                sell_score += 2.0
-                reasons.append("EMA+MACD Bearish")
-            elif closes[-1] > ema12 and macd_now > signal_line:
-                buy_score += 2.0
-                reasons.append("EMA+MACD Bullish")
-
-            if closes[-1] > bb_upper:
-                sell_score += 1.0
-                reasons.append("Overbought BB")
-            elif closes[-1] < bb_lower:
-                buy_score += 1.0
-                reasons.append("Oversold BB")
-
-            avg_vol = sum(volumes[-20:-1]) / max(1, len(volumes[-20:-1]))
-            last_vol = volumes[-1] if volumes else 0
-            vol_ratio = last_vol / avg_vol if avg_vol > 0 else 1.0
-            if vol_ratio > 1.2 and closes[-1] < closes[-2]:
-                sell_score += 1.0
-                reasons.append(f"Vol×{vol_ratio:.1f} Down")
-            elif vol_ratio > 1.2 and closes[-1] > closes[-2]:
-                buy_score += 1.0
-                reasons.append(f"Vol×{vol_ratio:.1f} Up")
-
-            atr = (max(highs[-14:]) - min(lows[-14:])) / 2
-            if atr <= 0:
-                atr = entry * 0.005
-
-            bias = sell_score - buy_score
-            if bias >= 2.0:
-                signal = 'SELL'
-                confidence = min(95.0, 55 + bias * 8)
-            elif bias <= -2.0:
-                signal = 'BUY'
-                confidence = min(95.0, 55 + abs(bias) * 8)
-            else:
-                signal = 'NEUTRAL'
-                confidence = 40.0
-
-            if signal == 'SELL':
-                tp1 = entry - atr
-                tp2 = entry - atr * 1.5
-                tp3 = entry - atr * 2.2
-                sl = entry + atr * 0.8
-            elif signal == 'BUY':
-                tp1 = entry + atr
-                tp2 = entry + atr * 1.5
-                tp3 = entry + atr * 2.2
-                sl = entry - atr * 0.8
-            else:
-                tp1 = tp2 = tp3 = sl = 0
-
-            return {
-                'symbol': symbol,
-                'interval': interval,
-                'signal': signal,
-                'confidence': round(confidence, 1),
-                'entry': round(entry, 8),
-                'tp1': round(tp1, 8),
-                'tp2': round(tp2, 8),
-                'tp3': round(tp3, 8),
-                'sl': round(sl, 8),
-                'rr_ratio': round(1.25, 2),
-                'win_percentage': round(max(0.0, min(100.0, 50 + bias * 10)), 1),
-                'method': f'QuickFallback ({signal})',
-                'summary': {
-                    'total': 6,
-                    'buy': int(buy_score),
-                    'sell': int(sell_score),
-                    'neutral': 0,
-                    'avg_confidence': round(confidence, 1),
-                    'bias': round((sell_score - buy_score) / 6.0, 3)
-                },
-                'top_methods': [{'method': r, 'confidence': round(confidence, 1)} for r in reasons[:5]],
-                'timestamp': str(datetime.now()),
-                'all_results_count': 6
-            }
-        except Exception as e:
-            logger.warning(f"_quick_short_analysis error {symbol}: {e}")
-            return None
-
-    def find_short_signal(self, symbol, interval='5m'):
-        """
-        main.py call කරනවා — coin එකක SELL signal එක හොයනවා.
-        මුලින් 50-method aggregate එක try කරනවා, නැත්නම් fallback analysis.
-        """
-        aggregate_names = [
-            'analyze_aggregate', 'aggregate_analysis', 'full_analysis',
-            'analyze_symbol', 'analyze_coin', 'analyze_all',
-            'get_aggregate_signal', 'run_full_analysis'
-        ]
-        for name in aggregate_names:
-            method = getattr(self, name, None)
-            if method is None:
-                continue
-            try:
-                result = method(symbol, interval)
-            except TypeError:
-                try:
-                    result = method(symbol)
-                except Exception as e:
-                    logger.warning(f"{name}({symbol}) failed: {e}")
-                    result = None
-            except Exception as e:
-                logger.warning(f"{name}({symbol}) failed: {e}")
-                result = None
-            if result and result.get('signal') == 'SELL':
-                return result
-            break  # aggregate එක හම්බුනා නම් ඒකම use කරන්න
-
-        result = self._quick_short_analysis(symbol, interval)
-        if result and result.get('signal') == 'SELL':
-            key = f"{symbol}_SELL_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            if key not in self.signal_tracker:
-                self.signal_tracker[key] = result
-                self._save_signals()
-            return result
-        return None
-
-    def check_power_buy_shana(self, *args, **kwargs):
-        """
-        main.py call කරනවා — COINS ඔක්කොම scan කරලා
-        strong BUY signals list එකක් දෙනවා.
-        """
-        results = []
-        for coin in COINS:
-            try:
-                result = None
-                for name in ['analyze_aggregate', 'aggregate_analysis', 'full_analysis',
-                             'analyze_symbol', 'analyze_coin', 'analyze_all',
-                             'get_aggregate_signal', 'run_full_analysis']:
-                    method = getattr(self, name, None)
-                    if method is None:
-                        continue
-                    try:
-                        result = method(coin, '5m')
-                    except TypeError:
-                        try:
-                            result = method(coin)
-                        except Exception:
-                            result = None
-                    except Exception:
-                        result = None
-                    break
-                if result is None:
-                    result = self._quick_short_analysis(coin, '5m')
-                if result and result.get('signal') == 'BUY' and result.get('confidence', 0) >= 55:
-                    results.append(result)
-            except Exception as e:
-                logger.warning(f"check_power_buy_shana error {coin}: {e}")
-                continue
-        results.sort(key=lambda x: x.get('confidence', 0), reverse=True)
-        return results
-            
