@@ -322,7 +322,7 @@ def _sl_now():
                 # 🛑 SL — LOST msg
                 if not item['sl_msg_sent']:
                     hit = (signal == 'BUY' and current <= sl * 0.9995) or \
-                          (signal == 'SELL' and current >= sl * 1
+                          (signal == 'SELL' and current >= sl * 1 )
                            def check_signal_results(self):
         """🔍 Live price check → TP1 WIN / TP2 WIN / SL LOST messages"""
         self._ensure_batch_state()
