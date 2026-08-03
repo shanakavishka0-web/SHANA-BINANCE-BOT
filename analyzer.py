@@ -24,6 +24,9 @@ COINS = [
     "AVAXUSDT", "MATICUSDT", "ATOMUSDT", "ETCUSDT", "TRXUSDT",
 ]
 
+INTERVALS = {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h",
+             "2h": "2h", "4h": "4h", "1d": "1d"}
+
 
 class BinanceAnalyzer:
 
@@ -74,352 +77,446 @@ class BinanceAnalyzer:
         if price >= 1000:
             return f"{price:,.2f}"
         if price >= 1:
-            return f"{price:.4f}"
-        return f"{price:.8f}".rstrip('0').rstrip('.')
-
-    def _fmt_pct(self, pct):
-        try:
-            return f"{float(pct):.1f}%"
-        except (TypeError, ValueError):
-            return "0.0%"
-
-    def _progress_bar(self, win_pct, width=10):
-        try:
-            pct = max(0.0, min(100.0, float(win_pct)))
-        except (TypeError, ValueError):
-            pct = 0.0
-        filled = int(round(pct / 100.0 * width))
-        return "█" * filled + "░" * (width - filled)
+            return f"{price:,.4f}"
+        return f"{price:.8f}"
 
     # ============================================================
-    # 🔌 BINANCE API HELPERS
+    # 🌐 BINANCE API
     # ============================================================
 
-    def _make_request(self, path, params=None):
-        url = f"{self.base_url}{path}"
-        resp = self.session.get(url, params=params or {}, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-
-    def get_ticker(self, coin):
-        """💰 Live price ticker — {'last': '1234.56', ...}"""
+    def _request(self, path, params=None):
+        url = self.base_url + path
         try:
-            return self._make_request("/api/v3/ticker/price", {"symbol": coin})
+            r = self.session.get(url, params=params or {}, timeout=15)
+            r.raise_for_status()
+            return r.json()
         except Exception as e:
-            logger.warning(f"get_ticker error {coin}: {e}")
+            logger.warning(f"API error {path}: {e}")
             return None
 
-    def _get_klines(self, coin, interval="1h", limit=60):
-        """🕯️ 1h candles — signal generation සඳහා"""
+    def check_binance_connection(self):
+        """✅ Binance API එකට connection එක check කරනවා"""
+        data = self._request("/api/v3/ping")
+        if data is None:
+            return "❌ Connection FAILED"
+        t = self._request("/api/v3/time")
+        if t:
+            return f"✅ Connected — Server time: {t.get('serverTime')}"
+        return "✅ Connected (ping OK)"
+
+    def get_price(self, coin):
+        """💰 එක coin එකක live price එක"""
+        data = self._request("/api/v3/ticker/price", {"symbol": coin})
         try:
-            data = self._make_request(
-                "/api/v3/klines",
-                {"symbol": coin, "interval": interval, "limit": limit},
-            )
-            candles = []
-            for k in data:
+            return float(data["price"])
+        except Exception:
+            return 0.0
+
+    def get_live_prices(self, coins=None):
+        """🕹️ LIVE PRICE — coin list එකට price + 24h change % (dict)"""
+        coins = coins or COINS
+        out = {}
+        for c in coins:
+            try:
+                t = self._request("/api/v3/ticker/24hr", {"symbol": c})
+                if t:
+                    out[c] = {
+                        "price": float(t["lastPrice"]),
+                        "change": float(t["priceChangePercent"]),
+                        "high": float(t["highPrice"]),
+                        "low": float(t["lowPrice"]),
+                        "volume": float(t["volume"]),
+                    }
+            except Exception as e:
+                logger.warning(f"live price {c}: {e}")
+        return out
+
+    def _get_klines(self, coin, interval="1h", limit=200):
+        """🕯️ Candles — Binance klines API එකෙන් (open/high/low/close/volume)"""
+        data = self._request("/api/v3/klines", {
+            "symbol": coin, "interval": INTERVALS.get(interval, interval),
+            "limit": limit,
+        })
+        candles = []
+        if not data:
+            return candles
+        for k in data:
+            try:
                 candles.append({
+                    "time": int(k[0]),
                     "open": float(k[1]),
                     "high": float(k[2]),
                     "low": float(k[3]),
                     "close": float(k[4]),
                     "volume": float(k[5]),
                 })
-            return candles
-        except Exception as e:
-            logger.warning(f"_get_klines error {coin}: {e}")
+            except Exception:
+                continue
+        return candles
+
+    # ============================================================
+    # 📐 INDICATORS (TradingView-style — RSI, MACD, EMA, Boll, ATR, Stoch)
+    # ============================================================
+
+    @staticmethod
+    def _ema(values, period):
+        if not values:
             return []
+        k = 2 / (period + 1)
+        ema = [values[0]]
+        for v in values[1:]:
+            ema.append(v * k + ema[-1] * (1 - k))
+        return ema
+
+    @staticmethod
+    def _sma(values, period):
+        if len(values) < period:
+            return []
+        return [sum(values[i - period + 1:i + 1]) / period
+                for i in range(period - 1, len(values))]
 
     def _rsi(self, candles, period=14):
-        """📉 RSI (Wilder's smoothing)"""
+        """RSI (Wilder's smoothing)"""
         closes = [c["close"] for c in candles]
         if len(closes) < period + 1:
             return 50.0
         gains, losses = [], []
         for i in range(1, len(closes)):
-            diff = closes[i] - closes[i - 1]
-            gains.append(max(diff, 0.0))
-            losses.append(max(-diff, 0.0))
-        avg_gain = sum(gains[:period]) / period
-        avg_loss = sum(losses[:period]) / period
+            d = closes[i] - closes[i - 1]
+            gains.append(max(d, 0.0))
+            losses.append(max(-d, 0.0))
+        avg_g = sum(gains[:period]) / period
+        avg_l = sum(losses[:period]) / period
         for i in range(period, len(gains)):
-            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        if avg_loss == 0:
+            avg_g = (avg_g * (period - 1) + gains[i]) / period
+            avg_l = (avg_l * (period - 1) + losses[i]) / period
+        if avg_l == 0:
             return 100.0
-        rs = avg_gain / avg_loss
+        rs = avg_g / avg_l
         return 100.0 - (100.0 / (1.0 + rs))
 
+    def _macd(self, candles, fast=12, slow=26, signal=9):
+        """MACD line, signal line, histogram"""
+        closes = [c["close"] for c in candles]
+        if len(closes) < slow + signal:
+            return None
+        ema_f = self._ema(closes, fast)
+        ema_s = self._ema(closes, slow)
+        macd_line = [f - s for f, s in zip(ema_f, ema_s)]
+        signal_line = self._ema(macd_line, signal)
+        hist = [m - s for m, s in zip(macd_line, signal_line)]
+        return {"macd": macd_line[-1], "signal": signal_line[-1],
+                "hist": hist[-1], "prev_hist": hist[-2] if len(hist) > 1 else 0}
+
+    def _bollinger(self, candles, period=20, mult=2.0):
+        """Bollinger Bands — upper, middle, lower, bandwidth"""
+        closes = [c["close"] for c in candles]
+        if len(closes) < period:
+            return None
+        sma = self._sma(closes, period)[-1]
+        var = sum((c - sma) ** 2 for c in closes[-period:]) / period
+        std = var ** 0.5
+        return {"upper": sma + mult * std, "middle": sma,
+                "lower": sma - mult * std, "bandwidth": (2 * mult * std) / sma if sma else 0}
+
     def _atr(self, candles, period=14):
-        """📏 ATR — TP/SL distance calculate කරන්න"""
+        """ATR — Average True Range"""
         if len(candles) < period + 1:
             return 0.0
         trs = []
         for i in range(1, len(candles)):
-            h, l, pc = candles[i]["high"], candles[i]["low"], candles[i - 1]["close"]
-            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+            tr = max(
+                candles[i]["high"] - candles[i]["low"],
+                abs(candles[i]["high"] - candles[i - 1]["close"]),
+                abs(candles[i]["low"] - candles[i - 1]["close"]),
+            )
+            trs.append(tr)
         return sum(trs[-period:]) / period
 
-    def _signal_dict(self, coin, signal, entry, tp1, tp2, sl, rsi):
-        """📦 Signal dict හදනවා — main.py එකට ඕන හැම key එකක්ම
-        ('confidence' + 'message' ඇතුළුව) මේකේ තියෙනවා ✅"""
-        confidence = round(min(99.0, abs(50.0 - rsi) * 2.0), 1)
-        sig = {
-            "coin": coin,
-            "signal": signal,
-            "entry": entry,
-            "tp1": tp1,
-            "tp2": tp2,
-            "sl": sl,
-            "rsi": round(rsi, 2),
-            "confidence": confidence,
-            "status": "ACTIVE",
-            "win_pct": 0.0,
-            "tp1_msg_sent": False,
-            "tp2_msg_sent": False,
-            "sl_msg_sent": False,
-            "created_at": str(self._sl_now()),
-            "message": "",
-        }
-        sig["message"] = self.build_signal_message(sig)
+    def _stoch(self, candles, k_period=14, d_period=3):
+        """Stochastic %K / %D"""
+        if len(candles) < k_period + d_period:
+            return {"k": 50.0, "d": 50.0}
+        ks = []
+        for i in range(len(candles) - d_period, len(candles)):
+            window = candles[i - k_period + 1:i + 1]
+            low = min(c["low"] for c in window)
+            high = max(c["high"] for c in window)
+            k = 50.0 if high == low else (
+                (candles[i]["close"] - low) / (high - low) * 100)
+            ks.append(k)
+        k = ks[-1]
+        d = sum(ks) / len(ks)
+        return {"k": k, "d": d}
+
+    @staticmethod
+    def _volume_ratio(candles, period=20):
+        """📊 Volume ratio — current vs average (pressure check)"""
+        vols = [c["volume"] for c in candles]
+        if len(vols) < period + 1:
+            return 1.0
+        avg = sum(vols[-period - 1:-1]) / period
+        return vols[-1] / avg if avg else 1.0
+
+    def _score(self, candles, direction="SELL"):
+        """🧠 0–100 composite score — RSI + MACD + EMA + Boll + Stoch + Volume"""
+        score = 50.0
+        rsi = self._rsi(candles)
+        macd = self._macd(candles)
+        boll = self._bollinger(candles)
+        stoch = self._stoch(candles)
+        vr = self._volume_ratio(candles)
+        closes = [c["close"] for c in candles]
+        ema20 = self._ema(closes, 20)[-1] if len(closes) >= 20 else closes[-1]
+        ema50 = self._ema(closes, 50)[-1] if len(closes) >= 50 else closes[-1]
+        ema200 = self._ema(closes, 200)[-1] if len(closes) >= 200 else closes[-1]
+        price = closes[-1]
+
+        if direction == "SELL":
+            # RSI overbought → bearish
+            if rsi > 70: score += 12
+            elif rsi > 60: score += 6
+            elif rsi < 30: score -= 12
+            elif rsi < 45: score -= 6
+            # MACD bearish
+            if macd:
+                if macd["hist"] < 0: score += 8
+                if macd["macd"] < macd["signal"]: score += 5
+                if macd["prev_hist"] > 0 > macd["hist"]: score += 5  # death cross
+            # EMA trend
+            if price < ema20: score += 6
+            if ema20 < ema50: score += 6
+            if price < ema200: score += 6
+            # Bollinger
+            if boll and price > boll["middle"]: score += 4
+            if boll and boll["bandwidth"] < 0.05: score += 3  # squeeze → breakout
+            # Stochastic
+            if stoch["k"] > 80: score += 5
+            if stoch["k"] < stoch["d"]: score += 3
+            # Volume confirmation
+            if vr > 1.2 and rsi > 60: score += 5
+        else:  # BUY
+            if rsi < 30: score += 12
+            elif rsi < 40: score += 6
+            elif rsi > 70: score -= 12
+            elif rsi > 55: score -= 6
+            if macd:
+                if macd["hist"] > 0: score += 8
+                if macd["macd"] > macd["signal"]: score += 5
+                if macd["prev_hist"] < 0 < macd["hist"]: score += 5  # golden cross
+            if price > ema20: score += 6
+            if ema20 > ema50: score += 6
+            if price > ema200: score += 6
+            if boll and price < boll["middle"]: score += 4
+            if boll and boll["bandwidth"] < 0.05: score += 3
+            if stoch["k"] < 20: score += 5
+            if stoch["k"] > stoch["d"]: score += 3
+            if vr > 1.2 and rsi < 40: score += 5
+
+        return max(0.0, min(100.0, score))
+
+    # ============================================================
+    # 🧠 SIGNAL GENERATOR — ඔක්කොම indicators use කරලා තීරණය
+    # ============================================================
+
+    def _generate_signal(self, coin, interval="1h", threshold=70):
+        """📡 Coin එකක් සඳහා final BUY/SELL signal එකක් හදනවා"""
+        candles = self._get_klines(coin, interval, 220)
+        if len(candles) < 60:
+            return None
+        price = candles[-1]["close"]
+        rsi = self._rsi(candles)
+        macd = self._macd(candles)
+        boll = self._bollinger(candles)
+        stoch = self._stoch(candles)
+        vr = self._volume_ratio(candles)
+        atr = self._atr(candles)
+        sell_score = self._score(candles, "SELL")
+        buy_score = self._score(candles, "BUY")
+
+        direction = None
+        if sell_score >= threshold and sell_score > buy_score:
+            direction = "SELL"
+        elif buy_score >= threshold and buy_score > sell_score:
+            direction = "BUY"
+        if direction is None:
+            return None
+
+        entry = price
+        if direction == "SELL":
+            tp = entry - 1.5 * atr
+            sl = entry + 1.0 * atr
+        else:
+            tp = entry + 1.5 * atr
+            sl = entry - 1.0 * atr
+
+        sig = self._signal_dict(coin, direction, entry, tp, sl,
+                                rsi if direction == "SELL" else 100 - rsi,
+                                confidence=max(sell_score, buy_score))
+        sig["interval"] = interval
+        sig["macd"] = macd
+        sig["boll"] = boll
+        sig["stoch"] = stoch
+        sig["volume_ratio"] = vr
         return sig
 
-    def _generate_signal(self, coin):
-        """🎯 1h RSI + ATR → BUY/SELL signal + TP1/TP2/SL"""
-        candles = self._get_klines(coin, interval="1h", limit=60)
-        if len(candles) < 20:
-            return None
-        rsi = self._rsi(candles)
-        atr = self._atr(candles)
-        if atr <= 0:
-            return None
-        entry = candles[-1]["close"]
-
-        if rsi <= 30:
-            signal = "BUY"
-            tp1 = entry + atr
-            tp2 = entry + 2 * atr
-            sl = entry - atr
-        elif rsi >= 70:
-            signal = "SELL"
-            tp1 = entry - atr
-            tp2 = entry - 2 * atr
-            sl = entry + atr
-        else:
-            return None  # RSI neutral — signal නැහැ
-
-        return self._signal_dict(coin, signal, entry, tp1, tp2, sl, rsi)
+    def _signal_dict(self, coin, signal, entry, tp, sl, rsi, confidence=0.0):
+        """📦 Standard signal dict — status/win_pct live tracking සඳහා"""
+        return {
+            "coin": coin,
+            "signal": signal,
+            "entry": float(entry),
+            "tp": float(tp),
+            "sl": float(sl),
+            "rsi": float(rsi),
+            "confidence": float(confidence),
+            "win_pct": 0.0,
+            "status": "ACTIVE",
+            "timestamp": self._sl_now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
     # ============================================================
-    # 🧮 BATCH STATE
+    # 🔴 SHORT SIGNAL SCAN (5m / 1h / 2h / 24h) — main menu එකට
     # ============================================================
 
-    def _ensure_batch_state(self):
-        if not hasattr(self, "signal_queue") or self.signal_queue is None:
-            self.signal_queue = list(COINS)
-            self.active_batch = []
-            self.batch_results = []
-            self.batch_number = 1
-            self.completed_batches = []
-            self.signal_tracker = {}
-
-    def get_next_batch(self, count=10):
-        """🔄 ඊළඟ coins 10ට signals හදනවා — queue ඉවර වුනාම නැවත rotate වෙනවා"""
-        self._ensure_batch_state()
-        if not self.signal_queue:
-            self.signal_queue = list(COINS)  # auto-reset rotation
-        coins = []
-        while self.signal_queue and len(coins) < count:
-            coins.append(self.signal_queue.pop(0))
-        self.active_batch = coins
-        self.batch_results = []
-        self.signal_tracker = {}
+    def scan_short_signals(self, coins=None, interval="5m", threshold=72):
+        """🔴 හැම coin එකම analyze කරලා SHORT (SELL) signals list එකක්"""
+        coins = coins or COINS
+        results = []
         for coin in coins:
-            sig = self._generate_signal(coin)
-            if sig:
-                self.batch_results.append(sig)
-                self.signal_tracker[coin] = sig
-        if self.completed_batches:
-            self.batch_number = self.completed_batches[-1]["batch_number"] + 1
-        else:
-            self.batch_number = 1
-        logger.info(f"Batch #{self.batch_number}: {len(self.batch_results)} signals "
-                    f"({len(self.batch_results)}/{len(coins)} coins)")
-        return self.batch_results
+            try:
+                sig = self._generate_signal(coin, interval, threshold)
+                if sig and sig["signal"] == "SELL":
+                    sig["message"] = self.build_short_message(sig, interval)
+                    results.append(sig)
+                    self.signal_tracker[coin] = sig
+            except Exception as e:
+                logger.warning(f"scan_short {coin}: {e}")
+        results.sort(key=lambda s: s["confidence"], reverse=True)
+        logger.info(f"🔴 SHORT signals ({interval}): {len(results)}")
+        return results
+
+    def scan_buy_signals(self, coins=None, interval="5m", threshold=72):
+        """🟢 හැම coin එකම analyze කරලා BUY signals list එකක්"""
+        coins = coins or COINS
+        results = []
+        for coin in coins:
+            try:
+                sig = self._generate_signal(coin, interval, threshold)
+                if sig and sig["signal"] == "BUY":
+                    sig["message"] = self.build_short_message(sig, interval)
+                    results.append(sig)
+                    self.signal_tracker[coin] = sig
+            except Exception as e:
+                logger.warning(f"scan_buy {coin}: {e}")
+        results.sort(key=lambda s: s["confidence"], reverse=True)
+        return results
+
+    def score_coins(self, coins=None, interval="5m"):
+        """🟢 NOW GOOD COIN — හැම coin එකකම bullish score එක ප්රතිශත වලින්"""
+        coins = coins or COINS
+        out = []
+        for coin in coins:
+            try:
+                candles = self._get_klines(coin, interval, 220)
+                if len(candles) < 60:
+                    continue
+                score = self._score(candles, "BUY")
+                out.append({
+                    "coin": coin,
+                    "score": round(score, 1),
+                    "rsi": round(self._rsi(candles), 1),
+                    "price": candles[-1]["close"],
+                })
+            except Exception as e:
+                logger.warning(f"score {coin}: {e}")
+        out.sort(key=lambda x: x["score"], reverse=True)
+        return out
 
     # ============================================================
-    # 🔌 CONNECTION CHECK
+    # 📝 SIGNAL MESSAGES (fancy, bold, full details)
     # ============================================================
 
-    def check_binance_connection(self):
-        """🔌 Binance API + Secret Key 100% connection check (binance.com)"""
-        status = {"connected": False, "ping": False, "time": False,
-                  "account": False, "message": ""}
-        try:
-            ping = self._make_request("/api/v3/ping")
-            status["ping"] = ping == {}
-            srv_time = self._make_request("/api/v3/time")
-            status["time"] = bool(srv_time and "serverTime" in srv_time)
+    def build_short_message(self, sig, interval=None):
+        """🔴 SHORT signal message — Entry/SL/TP/Confidence සියල්ල"""
+        interval = sig.get("interval", interval or "5m")
+        tf_label = {"5m": "5 MINUTE", "1h": "1 HOUR", "2h": "2 HOURS",
+                    "1d": "24 HOURS"}.get(interval, interval.upper())
+        arrow = "🔴 SHORT (SELL)" if sig["signal"] == "SELL" else "🟢 LONG (BUY)"
+        bar = self._progress_bar(sig["confidence"])
+        msg = (
+            f"🎯 *{arrow}* — `{sig['coin']}`\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"⏰ Timeframe: `{tf_label}`\n"
+            f"📌 *Entry:* `{self._fmt_price(sig['entry'])}`\n"
+            f"🎯 *Take Profit (TP):* `{self._fmt_price(sig['tp'])}`\n"
+            f"🛑 *Stop Loss (SL):* `{self._fmt_price(sig['sl'])}`\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🧠 Confidence: `{sig['confidence']:.0f}%`\n"
+            f"{bar}\n"
+            f"📊 RSI: `{sig['rsi']:.1f}` | ATR Based Levels\n"
+            f"⏳ Signal Time: `{sig.get('timestamp', '')}`\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"💡 SL break වුනොත් trade එක close කරන්න. TP වලදී profit lock කරගන්න."
+        )
+        return msg
 
-            if self.api_key and self.secret:
-                try:
-                    ts = int(time.time() * 1000)
-                    query = f"timestamp={ts}"
-                    sig = hmac.new(self.secret.encode(), query.encode(),
-                                   hashlib.sha256).hexdigest()
-                    url = f"{self.base_url}/api/v3/account?{query}&signature={sig}"
-                    resp = self.session.get(url, headers={"X-MBX-APIKEY": self.api_key}, timeout=10)
-                    status["account"] = resp.status_code == 200
-                    if not status["account"]:
-                        status["message"] = (f"Account check HTTP {resp.status_code} — "
-                                             "API key permissions/whitelist බලන්න")
-                except Exception as e:
-                    status["message"] = f"Signed request error: {e}"
-            else:
-                status["message"] = ("BINANCE_API_KEY/SECRET .env එකේ set කරලා නැහැ "
-                                     "(public analysis වැඩ කරනවා)")
-            status["connected"] = status["ping"] and status["time"]
-            logger.info(f"Binance connection: {status}")
-        except Exception as e:
-            status["message"] = f"Connection error: {e}"
-        return status
+    def build_power_buy_message(self, sig):
+        """⚡ POWER BUY message — RSI < 25 deep oversold"""
+        return (
+            f"⚡⚡ *POWER BUY SHANA* ⚡⚡\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🟢 *{sig['coin']}* — BUY (Oversold)\n"
+            f"📌 *Entry:* `{self._fmt_price(sig['entry'])}`\n"
+            f"🎯 *TP1:* `{self._fmt_price(sig['tp'])}` | *TP2:* `{self._fmt_price(sig.get('tp2', sig['entry'] * 2 - sig['sl']))}`\n"
+            f"🛑 *SL:* `{self._fmt_price(sig['sl'])}`\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🧠 RSI: `{sig['rsi']:.1f}` (< 25 = Deep Oversold 🔥)\n"
+            f"⏳ `{sig.get('timestamp', '')}`"
+        )
 
-    # ============================================================
-    # 📊 MESSAGE BUILDERS
-    # ============================================================
-
-    def build_signal_message(self, item):
-        """📨 Signal message — main.py එකේ sig['message'] send කරනවා නම් මේක"""
-        sl_time = self._sl_now()
-        lines = [
-            f"📨 *SHANA SIGNAL* 📨",
-            f"━━━━━━━━━━━━━━━━━━",
-            f"🪙 Coin: `{item['coin']}`",
-            f"📈 Signal: `{item['signal']}`",
-            f"💵 Entry: `{self._fmt_price(item['entry'])}`",
-            f"🎯 TP1: `{self._fmt_price(item['tp1'])}`",
-            f"🎯 TP2: `{self._fmt_price(item['tp2'])}`",
-            f"🛑 SL: `{self._fmt_price(item['sl'])}`",
-            f"📊 RSI: `{item.get('rsi', '')}` | Confidence: `{item.get('confidence', '')}%`",
-            f"━━━━━━━━━━━━━━━━━━",
-            f"🇱🇰 {sl_time.strftime('%Y-%m-%d %H:%M:%S')}",
-        ]
-        return "\n".join(lines)
-
-    def build_power_buy_message(self, item):
-        """⚡ POWER BUY message"""
-        sl_time = self._sl_now()
-        lines = [
-            f"⚡ *SHANA POWER BUY* ⚡",
-            f"━━━━━━━━━━━━━━━━━━",
-            f"🪙 Coin: `{item['coin']}`",
-            f"📈 Signal: `{item['signal']}`",
-            f"💵 Entry: `{self._fmt_price(item['entry'])}`",
-            f"🎯 TP1: `{self._fmt_price(item['tp1'])}`",
-            f"🎯 TP2: `{self._fmt_price(item['tp2'])}`",
-            f"🛑 SL: `{self._fmt_price(item['sl'])}`",
-            f"📊 RSI: `{item.get('rsi', '')}` | Confidence: `{item.get('confidence', '')}%`",
-            f"━━━━━━━━━━━━━━━━━━",
-            f"🇱🇰 {sl_time.strftime('%Y-%m-%d %H:%M:%S')}",
-        ]
-        return "\n".join(lines)
-
-    def build_win_message(self, item, level=1):
-        """🎯 WIN message — Telegram format"""
-        sl_time = self._sl_now()
-        lines = [
-            f"🎯 *SHANA WIN {level}* 🎯",
-            f"━━━━━━━━━━━━━━━━━━",
-            f"🪙 Coin: `{item['coin']}`",
-            f"📈 Signal: `{item['signal']}`",
-            f"💵 Entry: `{self._fmt_price(item['entry'])}`",
-            f"🎯 TP{level}: `{self._fmt_price(item[f'tp{level}'])}`",
-            f"{self._progress_bar(item['win_pct'])} {self._fmt_pct(item['win_pct'])}",
-            f"━━━━━━━━━━━━━━━━━━",
-            f"🇱🇰 {sl_time.strftime('%Y-%m-%d %H:%M:%S')}",
-        ]
-        return "\n".join(lines)
-
-    def build_lost_message(self, item):
-        """🛑 LOST message — Telegram format"""
-        sl_time = self._sl_now()
-        lines = [
-            f"🛑 *SHANA LOST* 🛑",
-            f"━━━━━━━━━━━━━━━━━━",
-            f"🪙 Coin: `{item['coin']}`",
-            f"📈 Signal: `{item['signal']}`",
-            f"💵 Entry: `{self._fmt_price(item['entry'])}`",
-            f"🛑 SL: `{self._fmt_price(item['sl'])}`",
-            f"━━━━━━━━━━━━━━━━━━",
-            f"🇱🇰 {sl_time.strftime('%Y-%m-%d %H:%M:%S')}",
-        ]
-        return "\n".join(lines)
+    @staticmethod
+    def _progress_bar(pct, length=10):
+        filled = int(max(0.0, min(100.0, pct)) / 100 * length)
+        return '█' * filled + '░' * (length - filled)
 
     # ============================================================
-    # 🔍 LIVE SIGNAL RESULT CHECK
+    # 🔄 LIVE WIN/LOST TRACKING — price එක යද්දි % වෙනස් වෙනවා
     # ============================================================
 
-    def check_signal_results(self):
-        """🔍 Live price check → TP1 WIN / TP2 WIN / SL LOST messages"""
-        self._ensure_batch_state()
+    def check_signal_results(self, coins=None):
+        """📡 Tracked signals වල live price එක බලලා status/win_pct update කරනවා.
+        WIN_COMPLETE / LOST වුනාම status එක එතනම නවතිනවා."""
+        coins = coins or list(self.signal_tracker.keys())
         updates = []
-        for item in self.batch_results:
-            if item["status"] in ("WIN_COMPLETE", "LOST"):
+        for coin in coins:
+            item = self.signal_tracker.get(coin)
+            if not item or item.get("status") in ("WIN_COMPLETE", "LOST"):
                 continue
             try:
-                live = self.get_ticker(item["coin"])
-                if not live:
+                price = self.get_price(coin)
+                if price <= 0:
                     continue
-                current = float(live["last"])
-                tp1 = float(item["tp1"] or 0)
-                tp2 = float(item["tp2"] or 0)
-                sl = float(item["sl"] or 0)
-                signal = item["signal"]
-
-                # 🎯 TP1 — price එක TP1 ට ටිකක් වැඩි/අඩු වුනාම WIN msg
-                if not item["tp1_msg_sent"]:
-                    hit = (signal == "BUY" and current >= tp1 * 1.0005) or \
-                          (signal == "SELL" and current <= tp1 * 0.9995)
-                    if hit:
-                        item["tp1_msg_sent"] = True
-                        item["win_pct"] = 100.0
-                        updates.append({"type": "WIN1", "item": item,
-                                        "message": self.build_win_message(item, 1)})
-
-                # 🎯 TP2 — TP1 දිනපු ගමන් විතරක් check වෙනවා
-                elif not item["tp2_msg_sent"]:
-                    hit = (signal == "BUY" and current >= tp2 * 1.0005) or \
-                          (signal == "SELL" and current <= tp2 * 0.9995)
-                    if hit:
-                        item["tp2_msg_sent"] = True
-                        item["status"] = "WIN_COMPLETE"
-                        item["win_pct"] = 100.0
-                        updates.append({"type": "WIN2", "item": item,
-                                        "message": self.build_win_message(item, 2)})
-
-                # 🛑 SL — LOST msg (TP1 දිනන්න කලින් SL hit වුනොත්)
-                if not item["sl_msg_sent"]:
-                    hit = (signal == "BUY" and current <= sl * 0.9995) or \
-                          (signal == "SELL" and current >= sl * 1.0005)
-                    if hit:
-                        item["sl_msg_sent"] = True
-                        item["status"] = "LOST"
-                        item["win_pct"] = 0.0
-                        updates.append({"type": "LOST", "item": item,
-                                        "message": self.build_lost_message(item)})
-
-                # 📡 ACTIVE නම් live progress update
-                if item["status"] not in ("WIN_COMPLETE", "LOST"):
-                    if signal == "BUY":
-                        dist = abs(tp1 - float(item["entry"])) if tp1 != float(item["entry"]) else 0
-                        pct = min(100.0, abs(current - float(item["entry"])) / dist * 100) if dist > 0 else 0.0
+                entry, tp, sl = item["entry"], item["tp"], item["sl"]
+                if item["signal"] == "SELL":
+                    if price <= tp:
+                        item["status"], item["win_pct"] = "WIN_COMPLETE", 100.0
+                    elif price >= sl:
+                        item["status"], item["win_pct"] = "LOST", 0.0
                     else:
-                        dist = abs(float(item["entry"]) - tp1) if tp1 != float(item["entry"]) else 0
-                        pct = min(100.0, abs(float(item["entry"]) - current) / dist * 100) if dist > 0 else 0.0
-                    item["win_pct"] = round(pct, 1)
-
+                        item["win_pct"] = max(0.0, min(100.0,
+                            (entry - price) / (entry - tp) * 100))
+                else:  # BUY
+                    if price >= tp:
+                        item["status"], item["win_pct"] = "WIN_COMPLETE", 100.0
+                    elif price <= sl:
+                        item["status"], item["win_pct"] = "LOST", 0.0
+                    else:
+                        item["win_pct"] = max(0.0, min(100.0,
+                            (price - entry) / (tp - entry) * 100))
+                updates.append(dict(item))
                 # ✅ tracker sync
-                self.signal_tracker[item["coin"]] = item
+                self.signal_tracker[coin] = item
             except Exception as e:
                 logger.warning(f"check_signal_results error {item['coin']}: {e}")
                 continue
@@ -476,6 +573,7 @@ class BinanceAnalyzer:
             try:
                 sig = self._generate_signal(c)
                 if sig and sig["signal"] == "BUY":
+                    sig["message"] = self.build_short_message(sig)
                     return sig
             except Exception as e:
                 logger.warning(f"find_long_signal error {c}: {e}")
@@ -488,14 +586,40 @@ class BinanceAnalyzer:
             try:
                 sig = self._generate_signal(c)
                 if sig and sig["signal"] == "SELL":
+                    sig["message"] = self.build_short_message(sig)
                     return sig
             except Exception as e:
                 logger.warning(f"find_short_signal error {c}: {e}")
         return None
 
     # ============================================================
-    # 📦 BATCH SUMMARY / ROTATION
+    # 📦 BATCH ENGINE — 10 coin rotation
     # ============================================================
+
+    def _ensure_batch_state(self):
+        if not self.batch_results:
+            self.signal_queue = list(COINS)
+
+    def get_next_batch(self, size=10):
+        """🔄 ඊළඟ coins 10 batch එක generate කරනවා"""
+        self._ensure_batch_state()
+        if not self.signal_queue:
+            self.signal_queue = list(COINS)
+        batch = self.signal_queue[:size]
+        self.signal_queue = self.signal_queue[size:] + self.signal_queue[:size]
+        self.active_batch = batch
+        self.batch_results = []
+        for coin in batch:
+            try:
+                sig = self._generate_signal(coin, "1h")
+                if sig:
+                    sig["message"] = self.build_short_message(sig)
+                    self.batch_results.append(sig)
+                    self.signal_tracker[coin] = sig
+            except Exception as e:
+                logger.warning(f"get_next_batch {coin}: {e}")
+        logger.info(f"📦 Batch #{self.batch_number}: {len(self.batch_results)} signals")
+        return self.batch_results
 
     def is_batch_finished(self):
         """Batch එකේ coins ඔක්කොම WIN_COMPLETE/LOST වුනාද?"""
@@ -537,6 +661,7 @@ class BinanceAnalyzer:
             "losses": sum(1 for it in self.batch_results if it["status"] == "LOST"),
             "results": list(self.batch_results),
         })
+        self.batch_number += 1
         return self.get_next_batch(10)
 
 
@@ -546,3 +671,4 @@ if __name__ == "__main__":
     print("Batch:", a.get_next_batch(10))
     print("Active:", a.update_active_signals())
     print("Power buy:", a.check_power_buy_shana())
+    print("Short 5m:", len(a.scan_short_signals(interval="5m")))
